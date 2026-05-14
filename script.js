@@ -1,2483 +1,1202 @@
-/* Flexi OSSD Challenge - Core JS */
-(function(){
-	const screens = {
-		home: document.getElementById('screen-home'),
-		level: document.getElementById('screen-level'),
-		leaderboard: document.getElementById('screen-leaderboard'),
-		reward: document.getElementById('screen-reward'),
-		certificate: document.getElementById('screen-certificate')
+/* Flexi OSSD Challenge - Phase 2 game engine */
+(function () {
+	"use strict";
+
+	const app = document.getElementById("app");
+	const GRADE_CATALOG = Array.isArray(window.FLEXI_GRADE_CATALOG) ? window.FLEXI_GRADE_CATALOG : [];
+
+	const STORAGE_KEYS = {
+		lastSetup: "flexi:v2:lastSetup",
+		leaderboard: "flexi:v2:leaderboard"
 	};
 
-	const startForm = document.getElementById('start-form');
-	const nameInput = document.getElementById('player-name');
-	const gradeSelect = document.getElementById('start-grade');
-	const btnNormal = document.getElementById('btn-normal');
-	const btnFast = document.getElementById('btn-fast');
-	const btnOpenLeaderboard = document.getElementById('btn-open-leaderboard');
-
-	const labelStudent = document.getElementById('label-student');
-	const labelMode = document.getElementById('label-mode');
-	const levelBg = document.getElementById('level-bg');
-	const mascotImg = document.getElementById('mascot-img');
-	const mascotSay = document.getElementById('mascot-say');
-	const gradeNumber = document.getElementById('grade-number');
-	const btnComplete = document.getElementById('btn-complete');
-	const btnNext = document.getElementById('btn-next');
-	const btnExit = document.getElementById('btn-exit');
-	const stage = document.querySelector('.stage');
-	
-	const levelInstructions = document.getElementById('level-instructions');
-	const answerArea = document.getElementById('answer-area');
-	const miniProgressWrap = document.getElementById('mini-progress-wrap');
-	const miniProgressText = document.getElementById('mini-progress-text');
-	const miniProgressBar = document.getElementById('mini-progress-bar');
-
-	const timerEl = document.getElementById('timer');
-	const progressWrap = document.getElementById('progress-wrap');
-	const progressBar = document.getElementById('progress-bar');
-	const progressText = document.getElementById('progress-text');
-
-	const toastEl = document.getElementById('toast');
-
-	const leaderboardList = document.getElementById('leaderboard-list');
-	const btnBackHome = document.getElementById('btn-back-home');
-	const btnClearLeaderboard = document.getElementById('btn-clear-leaderboard');
-
-	const rewardMessage = document.getElementById('reward-message');
-	const btnPlayAgain = document.getElementById('btn-play-again');
-	const btnViewLeaderboard = document.getElementById('btn-view-leaderboard');
-	const btnDownloadCertificate = document.getElementById('btn-download-certificate');
-
-	const certStudentName = document.getElementById('cert-student-name');
-	const certAchievement = document.getElementById('cert-achievement');
-	const certDateValue = document.getElementById('cert-date-value');
-	const btnCapturePhoto = document.getElementById('btn-capture-photo');
-	const btnRetakePhoto = document.getElementById('btn-retake-photo');
-	const btnPrintCert = document.getElementById('btn-print-cert');
-	const btnBackToReward = document.getElementById('btn-back-to-reward');
-	const cameraPreview = document.getElementById('camera-preview');
-	const photoCanvas = document.getElementById('photo-canvas');
-
-	const FUNNY_COMMENTS = [
-		"You again? Didn’t I just pass you last grade?",
-		"You’re learning faster than my cat!",
-		"I should hire you as my assistant.",
-		"You’re smarter than my lunch!",
-		"You’re flexing that brain like a real Flexian!"
-	];
-
-	const MASCOT = {
-		teaching: 'img/flexi_teaching.png',
-		thinking: 'img/flexi_thinking.png',
-		happy: 'img/flexi_happy.png',
-		sad: 'img/flexi_sad.png',
-		clap: 'img/flexi_clap.png'
+	const MASCOTS = {
+		teaching: "img/flexi_teaching.png",
+		thinking: "img/flexi_thinking.png",
+		happy: "img/flexi_happy.png",
+		sad: "img/flexi_sad.png",
+		clap: "img/flexi_clap.png"
 	};
 
-	let session = {
-		name: '',
-		mode: 'normal', // 'normal' | 'fast'
-		startGrade: 1,
-		currentGrade: 1,
-		completed: 0,
-		startTime: 0, // ms
-		endTime: 0
-	};
-
-	/* Utils */
-	const clamp = (v, min, max)=> Math.max(min, Math.min(max, v));
-	const two = (n)=> String(n).padStart(2,'0');
-	function fmtDuration(ms){
-		const sec = Math.floor(ms/1000);
-		const m = Math.floor(sec/60);
-		const s = sec%60;
-		return `${m}m ${two(s)}s`;
-	}
-	function showToast(text){
-		toastEl.textContent = text;
-		toastEl.classList.add('show');
-		setTimeout(()=> toastEl.classList.remove('show'), 2200);
-	}
-	function setScreen(id){
-		Object.values(screens).forEach(el=> el.classList.remove('active'));
-		screens[id].classList.add('active');
-	}
-
-	/* Hash-based routing for separate pages */
-	const ROUTES = {
-		'': 'home',
-		'home': 'home',
-		'game': 'level',
-		'leaderboard': 'leaderboard',
-		'reward': 'reward',
-		'certificate': 'certificate'
-	};
-	
-	let canAccessReward = false; // Guard for reward page
-	
-	function navigate(route){
-		window.location.hash = route;
-	}
-	
-	function handleRoute(){
-		const hash = window.location.hash.slice(1) || 'home';
-		const route = hash.replace(/^\//, ''); // support #/home or #home
-		
-		// Route guards
-		if(route === 'reward' && !canAccessReward){
-			navigate('home');
-			return;
-		}
-		if(route === 'game' && !session.name){
-			navigate('home');
-			return;
-		}
-		
-		const screenId = ROUTES[route] || 'home';
-		setScreen(screenId);
-		
-		// Render leaderboard when navigating to it
-		if(route === 'leaderboard'){
-			renderLeaderboard();
-		}
-	}
-	
-	window.addEventListener('hashchange', handleRoute);
-	window.addEventListener('load', handleRoute);
-
-	/* Keyboard shortcuts */
-	document.addEventListener('keydown', (e)=>{
-		const activeHome = screens.home.classList.contains('active');
-		const activeLevel = screens.level.classList.contains('active');
-		if(activeHome){
-			if(e.key==='Enter'){
-				// Default to Fast-Track on Enter for speed
-				btnFast.click();
-			}
-			return;
-		}
-		if(activeLevel){
-			if(e.key==='Enter'){
-				if(!btnNext.disabled){ btnNext.click(); }
-				else{ btnComplete.click(); }
-			}
-			if(e.key==='Escape'){
-				btnExit.click();
-			}
-		}
-	});
-
-	/* Populate grade dropdown */
-	(function initGrades(){
-		const frag = document.createDocumentFragment();
-		// Add placeholder option
-		const placeholder = document.createElement('option');
-		placeholder.value = '';
-		placeholder.textContent = 'Select a grade';
-		placeholder.disabled = true;
-		placeholder.selected = true;
-		frag.appendChild(placeholder);
-		// Add grade options
-		for(let g=1; g<=12; g++){
-			const opt = document.createElement('option');
-			opt.value = String(g);
-			opt.textContent = `Grade ${g}`;
-			frag.appendChild(opt);
-		}
-		gradeSelect.appendChild(frag);
-	})();
-
-	/* Start handlers */
-	function startGame(mode){
-		const name = nameInput.value.trim();
-		const startGrade = parseInt(gradeSelect.value,10);
-		if(!name){ nameInput.focus(); return; }
-		if(!gradeSelect.value || isNaN(startGrade)){ gradeSelect.focus(); return; }
-
-		session = {
-			name,
-			mode,
-			startGrade,
-			currentGrade: startGrade,
-			completed: 0,
-			startTime: mode==='fast' ? Date.now() : 0,
-			endTime: 0
-		};
-
-		localStorage.setItem('flexi:lastSession', JSON.stringify(session));
-
-		labelStudent.innerHTML = `Student: <strong>${session.name}</strong>`;
-		labelMode.textContent = mode === 'fast' ? 'Fast-Track' : 'Normal';
-		timerEl.hidden = mode !== 'fast';
-		progressWrap.hidden = mode !== 'fast';
-
-		loadGrade(session.currentGrade, true);
-		navigate('game');
-	}
-
-	btnNormal.addEventListener('click', ()=> startGame('normal'));
-	btnFast.addEventListener('click', ()=> startGame('fast'));
-	btnOpenLeaderboard.addEventListener('click', ()=> navigate('leaderboard'));
-
-	/* Level logic */
-	let timerInterval = null;
-	function startTimer(){
-		if(timerInterval) clearInterval(timerInterval);
-		timerInterval = setInterval(()=>{
-			const now = Date.now();
-			const elapsed = now - session.startTime;
-			const m = Math.floor(elapsed/60000);
-			const s = Math.floor((elapsed%60000)/1000);
-			timerEl.textContent = `${two(m)}:${two(s)}`;
-		}, 250);
-	}
-	function stopTimer(){
-		if(timerInterval) clearInterval(timerInterval);
-	}
-
-	function bgForGrade(g){
-		return `img/bg_grade${clamp(g,1,12)}.jpg`;
-	}
-
-	let mascotChangeTimeout = null;
-	function changeMascot(newSrc, newText, immediate = false){
-		if(mascotChangeTimeout) clearTimeout(mascotChangeTimeout);
-		
-		if(immediate){
-			// Immediate change without transition
-			mascotImg.src = newSrc;
-			mascotSay.textContent = newText;
-			return;
-		}
-		
-		mascotImg.classList.add('changing');
-		mascotChangeTimeout = setTimeout(()=>{
-			mascotImg.src = newSrc;
-			mascotSay.textContent = newText;
-			mascotImg.classList.remove('changing');
-		}, 300);
-	}
-	
-	// Helper for question feedback with attempt tracking
-	let wrongAttempts = 0;
-	function resetAttempts(){
-		wrongAttempts = 0;
-	}
-	function handleCorrect(correctAnswersRef, callback){
-		resetAttempts();
-		changeMascot(MASCOT.happy, 'Great job!');
-		correctAnswersRef.count++;
-		if(callback) setTimeout(callback, 1000);
-	}
-	function handleWrong(resetCallback){
-		wrongAttempts++;
-		if(wrongAttempts === 1){
-			changeMascot(MASCOT.sad, 'Try again!');
-		}else{
-			changeMascot(MASCOT.thinking, 'Think carefully...');
-		}
-		if(resetCallback) setTimeout(resetCallback, 1000);
-	}
-	
-	// Universal question handlers
-	function createMultipleChoiceHandler(q, correctAnswersRef, nextCallback){
-		return (btn, idx)=>{
-			if(idx === q.correct){
-				btn.classList.add('correct');
-				handleCorrect(correctAnswersRef, nextCallback);
-			}else{
-				btn.classList.add('wrong');
-				handleWrong(()=>{
-					btn.classList.remove('wrong');
-				});
-			}
-		};
-	}
-	
-	function createFillBlankHandler(q, correctAnswersRef, nextCallback){
-		return ()=>{
-			const input = document.getElementById('fill-input');
-			const answer = input.value.trim().toLowerCase();
-			const correctAnswer = String(q.correct).toLowerCase();
-			if(answer === correctAnswer){
-				input.classList.add('correct');
-				handleCorrect(correctAnswersRef, nextCallback);
-			}else{
-				input.classList.add('wrong');
-				handleWrong(()=>{
-					input.classList.remove('wrong');
-					input.value = '';
-				});
-			}
-		};
-	}
-	
-	function createMatchingHandler(q, correctAnswersRef, nextCallback){
-		return ()=>{
-			const selects = document.querySelectorAll('.match-select');
-			let allCorrect = true;
-			selects.forEach(sel=>{
-				const idx = parseInt(sel.dataset.idx);
-				const selected = parseInt(sel.value);
-				if(selected === q.pairs[idx].correct){
-					sel.classList.add('correct');
-					sel.disabled = true;
-				}else{
-					sel.classList.add('wrong');
-					allCorrect = false;
-				}
-			});
-			
-			if(allCorrect){
-				handleCorrect(correctAnswersRef, nextCallback);
-			}else{
-				handleWrong(()=>{
-					selects.forEach(sel=>{
-						if(sel.classList.contains('wrong')){
-							sel.classList.remove('wrong');
-							sel.value = '';
-						}
-					});
-				});
-			}
+	function freshState() {
+		const setup = readLastSetup();
+		return {
+			route: "home",
+			playerName: setup.name || "",
+			mode: setup.mode || "challenge",
+			startGrade: setup.startGrade || 1,
+			currentGrade: setup.startGrade || 1,
+			currentQuestion: 0,
+			currentAttempts: 0,
+			phase: "question",
+			startedAt: 0,
+			finishedAt: 0,
+			score: 0,
+			firstTry: 0,
+			currentStreak: 0,
+			bestStreak: 0,
+			wrongAttempts: 0,
+			answerLog: [],
+			missedQuestions: [],
+			completedGrades: [],
+			selfieDataUrl: null,
+			cameraStatus: "idle",
+			cameraError: "",
+			feedback: null,
+			gradeComplete: null,
+			leaderboardEntryId: null
 		};
 	}
 
-	function loadGrade(g, first=false){
-		gradeNumber.textContent = String(g);
-		levelBg.style.backgroundImage = `url('${bgForGrade(g)}')`;
-		const text = first 
-			? `Hi ${session.name}! Welcome to Grade ${g}.`
-			: `Onward to Grade ${g}!`;
-		changeMascot(MASCOT.teaching, text);
-		btnNext.disabled = true;
-		if(session.mode==='fast'){
-			progressText.textContent = `Grade ${g}/12`;
-			progressBar.style.width = `${(g/12)*100}%`;
-			if(first) startTimer();
-		}
-		
-		// Load grade-specific mini-game
-		if(g === 1){
-			startGrade1MiniGame();
-		}else if(g === 2){
-			startGrade2MiniGame();
-		}else if(g === 3){
-			startGrade3MiniGame();
-		}else if(g === 4){
-			startGrade4MiniGame();
-		}else if(g === 5){
-			startGrade5MiniGame();
-		}else if(g === 6){
-			startGrade6MiniGame();
-		}else if(g === 7){
-			startGrade7MiniGame();
-		}else if(g === 8){
-			startGrade8MiniGame();
-		}else if(g === 9){
-			startGrade9MiniGame();
-		}else if(g === 10){
-			startGrade10MiniGame();
-		}else if(g === 11){
-			startGrade11MiniGame();
-		}else if(g === 12){
-			startGrade12MiniGame();
-		}else{
-			// Placeholder for other grades
-			showPlaceholder();
-		}
-	}
-	
-	function showPlaceholder(){
-		levelInstructions.textContent = 'Your question or mini-game will appear here soon.';
-		answerArea.innerHTML = '<button id="btn-complete-placeholder" class="btn ghost">Complete Grade</button>';
-		miniProgressWrap.style.display = 'none';
-		document.getElementById('btn-complete-placeholder').addEventListener('click', ()=>{
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.happy, quote);
-			btnNext.disabled = false;
-			if(session.mode==='fast'){
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-				if(session.completed>0 && session.completed%4===0){
-					const elapsed = Date.now()-session.startTime;
-					showToast(`🎉 You've completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-				}
-			}
-		});
-	}
-	
-	/* Grade 1 Mini-Game */
-	function startGrade1MiniGame(){
-		miniProgressWrap.style.display = 'block';
-		let currentQuestion = 0;
-		let correctAnswersRef = {count: 0};
-		
-		const questions = [
-			{
-				type: 'multiple-choice',
-				question: 'Which one is a living thing?',
-				options: ['Rock', 'Cat', 'Car', 'Doll'],
-				correct: 1
-			},
-			{
-				type: 'fill-blank',
-				question: '2 + 1 =',
-				correct: '3'
-			},
-			{
-				type: 'matching',
-				question: 'Match each picture to its word',
-				pairs: [
-					{icon: '🐱', options: ['Cat', 'Dog', 'Fish'], correct: 0},
-					{icon: '☀️', options: ['Moon', 'Sun', 'Star'], correct: 1},
-					{icon: '🚌', options: ['Car', 'Train', 'Bus'], correct: 2}
-				]
-			}
-		];
-		
-		function updateMiniProgress(){
-			const progress = (currentQuestion / questions.length) * 100;
-			miniProgressText.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
-			miniProgressBar.style.width = `${progress}%`;
-		}
-		
-		function showQuestion(){
-			resetAttempts();
-			updateMiniProgress();
-			const q = questions[currentQuestion];
-			changeMascot(MASCOT.teaching, q.instruction || q.question, true);
-			
-			if(q.type === 'multiple-choice'){
-				showMultipleChoice(q);
-			}else if(q.type === 'fill-blank'){
-				showFillBlank(q);
-			}else if(q.type === 'matching'){
-				showMatching(q);
-			}
-		}
-		
-		function showMultipleChoice(q){
-			if(q.instruction){
-				levelInstructions.textContent = q.instruction;
-			}else{
-				levelInstructions.textContent = '';
-			}
-			let html = `<div class="quiz-question">${q.question}</div><div class="options">`;
-			q.options.forEach((opt, idx)=>{
-				html += `<button class="option-btn" data-idx="${idx}">${opt}</button>`;
-			});
-			html += '</div>';
-			answerArea.innerHTML = html;
-			
-			document.querySelectorAll('.option-btn').forEach(btn=>{
-				const handler = createMultipleChoiceHandler(q, correctAnswersRef, nextQuestion);
-				btn.addEventListener('click', ()=> handler(btn, parseInt(btn.dataset.idx)));
-			});
-		}
-		
-		function showFillBlank(q){
-			levelInstructions.textContent = '';
-			answerArea.innerHTML = `
-				<div class="quiz-question">${q.question}</div>
-				<div class="fill-blank">
-					<input type="number" id="fill-input" maxlength="2" />
-				</div>
-				<button class="btn primary submit-btn" id="submit-fill">Submit</button>
-			`;
-			document.getElementById('submit-fill').addEventListener('click', createFillBlankHandler(q, correctAnswersRef, nextQuestion));
-		}
-		
-		function showMatching(q){
-			levelInstructions.textContent = '';
-			let html = `<div class="quiz-question">${q.question}</div><div class="matching-game">`;
-			q.pairs.forEach((pair, idx)=>{
-				html += `<div class="match-item">
-					<div class="match-icon">${pair.icon}</div>
-					<select class="match-select" data-idx="${idx}">
-						<option value="">Select...</option>`;
-				pair.options.forEach((opt, optIdx)=>{
-					html += `<option value="${optIdx}">${opt}</option>`;
-				});
-				html += `</select></div>`;
-			});
-			html += '</div><button class="btn primary submit-btn" id="submit-match">Submit</button>';
-			answerArea.innerHTML = html;
-			document.getElementById('submit-match').addEventListener('click', createMatchingHandler(q, correctAnswersRef, nextQuestion));
-		}
-		
-		function nextQuestion(){
-			currentQuestion++;
-			if(currentQuestion < questions.length){
-				showQuestion();
-			}else{
-				finishGrade1();
-			}
-		}
-		
-		function finishGrade1(){
-			miniProgressBar.style.width = '100%';
-			miniProgressText.textContent = 'Complete!';
-			levelInstructions.textContent = `You got ${correctAnswersRef.count} out of ${questions.length} correct!`;
-			answerArea.innerHTML = '<p style="text-align:center; font-size:18px; color:#28a745;">🎉 Well done!</p>';
-			
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.clap, quote);
-			
-			if(session.mode==='fast'){
-				btnNext.disabled = false;
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-				if(session.completed>0 && session.completed%4===0){
-					const elapsed = Date.now()-session.startTime;
-					showToast(`🎉 You've completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-				}
-			}else{
-				// Normal mode - auto finish after short delay
-				setTimeout(()=>{
-					finishNormal();
-				}, 2000);
-			}
-		}
-		
-		showQuestion();
-	}
-
-	/* Grade 2 Mini-Game */
-	function startGrade2MiniGame(){
-		miniProgressWrap.style.display = 'block';
-		let currentQuestion = 0;
-		let correctAnswersRef = {count: 0};
-		
-		const questions = [
-			{
-				type: 'fill-blank',
-				question: 'What is 5 − 2 = ?',
-				correct: '3'
-			},
-			{
-				type: 'multiple-choice',
-				question: 'The boy ______ a book.',
-				instruction: 'Choose the correct word',
-				options: ['read', 'reads'],
-				correct: 1
-			},
-			{
-				type: 'multiple-choice',
-				question: 'Choose the correct spelling',
-				options: ['yello', 'yellow'],
-				correct: 1
-			}
-		];
-		
-		function updateMiniProgress(){
-			const progress = (currentQuestion / questions.length) * 100;
-			miniProgressText.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
-			miniProgressBar.style.width = `${progress}%`;
-		}
-		
-		function showQuestion(){
-			resetAttempts();
-			updateMiniProgress();
-			const q = questions[currentQuestion];
-			changeMascot(MASCOT.teaching, q.instruction || q.question, true);
-			if(q.type === 'fill-blank'){
-				showFillBlank(q);
-			}else{
-				showMultipleChoice(q);
-			}
-		}
-		
-		function showFillBlank(q){
-			levelInstructions.textContent = '';
-			answerArea.innerHTML = `
-				<div class="quiz-question">${q.question}</div>
-				<div class="fill-blank">
-					<input type="number" id="fill-input" placeholder="?" style="width:100px;" />
-				</div>
-				<button class="btn primary submit-btn" id="submit-fill">Submit</button>
-			`;
-			document.getElementById('submit-fill').addEventListener('click', createFillBlankHandler(q, correctAnswersRef, nextQuestion));
-		}
-		
-		function showMultipleChoice(q){
-			if(q.instruction){
-				levelInstructions.textContent = q.instruction;
-			}else{
-				levelInstructions.textContent = '';
-			}
-			let html = `<div class="quiz-question">${q.question}</div><div class="options">`;
-			q.options.forEach((opt, idx)=>{
-				html += `<button class="option-btn" data-idx="${idx}">${opt}</button>`;
-			});
-			html += '</div>';
-			answerArea.innerHTML = html;
-			
-			document.querySelectorAll('.option-btn').forEach(btn=>{
-				const handler = createMultipleChoiceHandler(q, correctAnswersRef, nextQuestion);
-				btn.addEventListener('click', ()=> handler(btn, parseInt(btn.dataset.idx)));
-			});
-		}
-		
-		function nextQuestion(){
-			currentQuestion++;
-			if(currentQuestion < questions.length){
-				showQuestion();
-			}else{
-				finishGrade2();
-			}
-		}
-		
-		function finishGrade2(){
-			miniProgressBar.style.width = '100%';
-			miniProgressText.textContent = 'Complete!';
-			levelInstructions.textContent = `You got ${correctAnswersRef.count} out of ${questions.length} correct!`;
-			answerArea.innerHTML = '<p style="text-align:center; font-size:18px; color:#28a745;">🎉 Awesome work!</p>';
-			
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.clap, quote);
-			
-			if(session.mode==='fast'){
-				btnNext.disabled = false;
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-				if(session.completed>0 && session.completed%4===0){
-					const elapsed = Date.now()-session.startTime;
-					showToast(`🎉 You've completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-				}
-			}else{
-				// Normal mode - auto finish after short delay
-				setTimeout(()=>{
-					finishNormal();
-				}, 2000);
-			}
-		}
-		
-		showQuestion();
-	}
-
-	/* Grade 3 Mini-Game */
-	function startGrade3MiniGame(){
-		miniProgressWrap.style.display = 'block';
-		let currentQuestion = 0;
-		let correctAnswersRef = {count: 0};
-		
-		const questions = [
-			{
-				type: 'multiple-choice',
-				question: 'What is 8 + 5?',
-				options: ['12', '13', '14', '15'],
-				correct: 1
-			},
-			{
-				type: 'fill-blank',
-				question: 'The Sun is a ______',
-				correct: 'star'
-			},
-			{
-				type: 'matching',
-				question: 'Match each word to its correct plural',
-				pairs: [
-					{icon: 'child', options: ['childs', 'children', 'childes'], correct: 1},
-					{icon: 'foot', options: ['foots', 'feet', 'feets'], correct: 1},
-					{icon: 'mouse', options: ['mouses', 'mice', 'mices'], correct: 1}
-				]
-			}
-		];
-		
-		function updateMiniProgress(){
-			const progress = (currentQuestion / questions.length) * 100;
-			miniProgressText.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
-			miniProgressBar.style.width = `${progress}%`;
-		}
-		
-		function showQuestion(){
-			resetAttempts();
-			updateMiniProgress();
-			const q = questions[currentQuestion];
-			changeMascot(MASCOT.teaching, q.instruction || q.question, true);
-			
-			if(q.type === 'multiple-choice'){
-				showMultipleChoice(q);
-			}else if(q.type === 'fill-blank'){
-				showFillBlank(q);
-			}else if(q.type === 'matching'){
-				showMatching(q);
-			}
-		}
-		
-		function showMultipleChoice(q){
-			if(q.instruction){
-				levelInstructions.textContent = q.instruction;
-			}else{
-				levelInstructions.textContent = '';
-			}
-			let html = `<div class="quiz-question">${q.question}</div><div class="options">`;
-			q.options.forEach((opt, idx)=>{
-				html += `<button class="option-btn" data-idx="${idx}">${opt}</button>`;
-			});
-			html += '</div>';
-			answerArea.innerHTML = html;
-			
-			document.querySelectorAll('.option-btn').forEach(btn=>{
-				btn.addEventListener('click', ()=>{
-					const idx = parseInt(btn.dataset.idx);
-					if(idx === q.correct){
-						btn.classList.add('correct');
-						handleCorrect(correctAnswersRef, nextQuestion);
-					}else{
-						btn.classList.add('wrong');
-						handleWrong(()=>{
-							btn.classList.remove('wrong');
-						});
-					}
-				});
-			});
-		}
-		
-		function showFillBlank(q){
-			levelInstructions.textContent = '';
-			answerArea.innerHTML = `
-				<div class="quiz-question">${q.question}</div>
-				<div class="fill-blank">
-					<input type="text" id="fill-input" placeholder="Type your answer" />
-				</div>
-				<button class="btn primary submit-btn" id="submit-fill">Submit</button>
-			`;
-			
-			document.getElementById('submit-fill').addEventListener('click', ()=>{
-				const input = document.getElementById('fill-input');
-				const answer = input.value.trim().toLowerCase();
-				if(answer === q.correct.toLowerCase()){
-					input.classList.add('correct');
-					handleCorrect(correctAnswersRef, nextQuestion);
-				}else{
-					input.classList.add('wrong');
-					handleWrong(()=>{
-						input.classList.remove('wrong');
-						input.value = '';
-					});
-				}
-			});
-		}
-		
-		function showMatching(q){
-			levelInstructions.textContent = '';
-			let html = `<div class="quiz-question">${q.question}</div><div class="matching-game">`;
-			q.pairs.forEach((pair, idx)=>{
-				html += `<div class="match-item">
-					<div class="match-icon" style="font-size:18px; font-weight:700;">${pair.icon}</div>
-					<select class="match-select" data-idx="${idx}">
-						<option value="">Select...</option>`;
-				pair.options.forEach((opt, optIdx)=>{
-					html += `<option value="${optIdx}">${opt}</option>`;
-				});
-				html += `</select></div>`;
-			});
-			html += '</div><button class="btn primary submit-btn" id="submit-match">Submit</button>';
-			answerArea.innerHTML = html;
-			
-			document.getElementById('submit-match').addEventListener('click', ()=>{
-				const selects = document.querySelectorAll('.match-select');
-				let allCorrect = true;
-				selects.forEach(sel=>{
-					const idx = parseInt(sel.dataset.idx);
-					const selected = parseInt(sel.value);
-					if(selected === q.pairs[idx].correct){
-						sel.classList.add('correct');
-						sel.disabled = true;
-					}else{
-						sel.classList.add('wrong');
-						allCorrect = false;
-					}
-				});
-				
-				if(allCorrect){
-					handleCorrect(correctAnswersRef, nextQuestion);
-				}else{
-					handleWrong(()=>{
-						selects.forEach(sel=>{
-							if(sel.classList.contains('wrong')){
-								sel.classList.remove('wrong');
-								sel.value = '';
-							}
-						});
-					});
-				}
-			});
-		}
-		
-		function nextQuestion(){
-			currentQuestion++;
-			if(currentQuestion < questions.length){
-				showQuestion();
-			}else{
-				finishGrade3();
-			}
-		}
-		
-		function finishGrade3(){
-			miniProgressBar.style.width = '100%';
-			miniProgressText.textContent = 'Complete!';
-			levelInstructions.textContent = `You got ${correctAnswersRef.count} out of ${questions.length} correct!`;
-			answerArea.innerHTML = '<p style="text-align:center; font-size:18px; color:#28a745;">🎉 Fantastic job!</p>';
-			
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.clap, quote);
-			
-			if(session.mode==='fast'){
-				btnNext.disabled = false;
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-				if(session.completed>0 && session.completed%4===0){
-					const elapsed = Date.now()-session.startTime;
-					showToast(`🎉 You've completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-				}
-			}else{
-				// Normal mode - auto finish after short delay
-				setTimeout(()=>{
-					finishNormal();
-				}, 2000);
-			}
-		}
-		
-		showQuestion();
-	}
-
-	/* Grade 4 Mini-Game */
-	function startGrade4MiniGame(){
-		miniProgressWrap.style.display = 'block';
-		let currentQuestion = 0;
-		let correctAnswersRef = {count: 0};
-		
-		const questions = [
-			{
-				type: 'multiple-choice',
-				question: 'Which process turns water into water vapor?',
-				options: ['Freezing', 'Condensation', 'Evaporation', 'Melting'],
-				correct: 2
-			},
-			{
-				type: 'multiple-choice',
-				question: 'She ______ to school every day.',
-				instruction: 'Choose the correct word',
-				options: ['go', 'goes'],
-				correct: 1
-			},
-			{
-				type: 'multiple-choice',
-				question: 'Choose the correctly spelled word',
-				options: ['beatiful', 'beautiful'],
-				correct: 1
-			}
-		];
-		
-		function updateMiniProgress(){
-			const progress = (currentQuestion / questions.length) * 100;
-			miniProgressText.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
-			miniProgressBar.style.width = `${progress}%`;
-		}
-		
-		function showQuestion(){
-			resetAttempts();
-			updateMiniProgress();
-			const q = questions[currentQuestion];
-			changeMascot(MASCOT.teaching, q.instruction || q.question, true);
-			showMultipleChoice(q);
-		}
-		
-		function showMultipleChoice(q){
-			if(q.instruction){
-				levelInstructions.textContent = q.instruction;
-			}else{
-				levelInstructions.textContent = '';
-			}
-			let html = `<div class="quiz-question">${q.question}</div><div class="options">`;
-			q.options.forEach((opt, idx)=>{
-				html += `<button class="option-btn" data-idx="${idx}">${opt}</button>`;
-			});
-			html += '</div>';
-			answerArea.innerHTML = html;
-			
-			document.querySelectorAll('.option-btn').forEach(btn=>{
-				btn.addEventListener('click', ()=>{
-					const idx = parseInt(btn.dataset.idx);
-					if(idx === q.correct){
-						btn.classList.add('correct');
-						handleCorrect(correctAnswersRef, nextQuestion);
-					}else{
-						btn.classList.add('wrong');
-						handleWrong(()=>{
-							btn.classList.remove('wrong');
-						});
-					}
-				});
-			});
-		}
-		
-		function nextQuestion(){
-			currentQuestion++;
-			if(currentQuestion < questions.length){
-				showQuestion();
-			}else{
-				finishGrade4();
-			}
-		}
-		
-		function finishGrade4(){
-			miniProgressBar.style.width = '100%';
-			miniProgressText.textContent = 'Complete!';
-			levelInstructions.textContent = `You got ${correctAnswersRef.count} out of ${questions.length} correct!`;
-			answerArea.innerHTML = '<p style="text-align:center; font-size:18px; color:#28a745;">🎉 Amazing work!</p>';
-			
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.clap, quote);
-			
-			if(session.mode==='fast'){
-				btnNext.disabled = false;
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-				if(session.completed>0 && session.completed%4===0){
-					const elapsed = Date.now()-session.startTime;
-					showToast(`🎉 You've completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-				}
-			}else{
-				// Normal mode - auto finish after short delay
-				setTimeout(()=>{
-					finishNormal();
-				}, 2000);
-			}
-		}
-		
-		showQuestion();
-	}
-
-	/* Grade 5 Mini-Game */
-	function startGrade5MiniGame(){
-		miniProgressWrap.style.display = 'block';
-		let currentQuestion = 0;
-		let correctAnswersRef = {count: 0};
-		
-		const questions = [
-			{
-				type: 'multiple-choice',
-				question: 'What is 125 − 48?',
-				options: ['67', '77', '87', '97'],
-				correct: 1
-			},
-			{
-				type: 'multiple-choice',
-				question: 'If it ______ tomorrow, we will stay home.',
-				instruction: 'Choose the correct word',
-				options: ['rain', 'rains'],
-				correct: 1
-			},
-			{
-				type: 'multiple-choice',
-				question: 'Which of the following is a renewable energy source?',
-				options: ['Coal', 'Oil', 'Natural gas', 'Solar'],
-				correct: 3
-			},
-			{
-				type: 'multiple-choice',
-				question: 'Circle the correctly spelled word',
-				options: ['neccesary', 'necessary'],
-				correct: 1
-			}
-		];
-		
-		function updateMiniProgress(){
-			const progress = (currentQuestion / questions.length) * 100;
-			miniProgressText.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
-			miniProgressBar.style.width = `${progress}%`;
-		}
-		
-		function showQuestion(){
-			resetAttempts();
-			updateMiniProgress();
-			const q = questions[currentQuestion];
-			changeMascot(MASCOT.teaching, q.instruction || q.question, true);
-			showMultipleChoice(q);
-		}
-		
-		function showMultipleChoice(q){
-			if(q.instruction){
-				levelInstructions.textContent = q.instruction;
-			}else{
-				levelInstructions.textContent = '';
-			}
-			let html = `<div class="quiz-question">${q.question}</div><div class="options">`;
-			q.options.forEach((opt, idx)=>{
-				html += `<button class="option-btn" data-idx="${idx}">${opt}</button>`;
-			});
-			html += '</div>';
-			answerArea.innerHTML = html;
-			
-			document.querySelectorAll('.option-btn').forEach(btn=>{
-				btn.addEventListener('click', ()=>{
-					const idx = parseInt(btn.dataset.idx);
-					if(idx === q.correct){
-						btn.classList.add('correct');
-						handleCorrect(correctAnswersRef, nextQuestion);
-					}else{
-						btn.classList.add('wrong');
-						handleWrong(()=>{
-							btn.classList.remove('wrong');
-						});
-					}
-				});
-			});
-		}
-		
-		function nextQuestion(){
-			currentQuestion++;
-			if(currentQuestion < questions.length){
-				showQuestion();
-			}else{
-				finishGrade5();
-			}
-		}
-		
-		function finishGrade5(){
-			miniProgressBar.style.width = '100%';
-			miniProgressText.textContent = 'Complete!';
-			levelInstructions.textContent = `You got ${correctAnswersRef.count} out of ${questions.length} correct!`;
-			answerArea.innerHTML = '<p style="text-align:center; font-size:18px; color:#28a745;">🎉 Superb performance!</p>';
-			
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.clap, quote);
-			
-			if(session.mode==='fast'){
-				btnNext.disabled = false;
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-				if(session.completed>0 && session.completed%4===0){
-					const elapsed = Date.now()-session.startTime;
-					showToast(`🎉 You've completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-				}
-			}else{
-				// Normal mode - auto finish after short delay
-				setTimeout(()=>{
-					finishNormal();
-				}, 2000);
-			}
-		}
-		
-		showQuestion();
-	}
-
-	/* Grade 6 Mini-Game */
-	function startGrade6MiniGame(){
-		miniProgressWrap.style.display = 'block';
-		let currentQuestion = 0;
-		let correctAnswersRef = {count: 0};
-		
-		const questions = [
-			{
-				type: 'multiple-choice',
-				question: 'Which organ pumps blood through the body?',
-				options: ['Lungs', 'Stomach', 'Heart', 'Brain'],
-				correct: 2
-			},
-			{
-				type: 'multiple-choice',
-				question: '___ going to rain today.',
-				instruction: 'Choose the correct word',
-				options: ["She's", "It's"],
-				correct: 1
-			},
-			{
-				type: 'matching',
-				question: 'Match each ecosystem role to an example',
-				pairs: [
-					{icon: 'Producer', options: ['Grass', 'Lion', 'Mushroom'], correct: 0},
-					{icon: 'Consumer', options: ['Grass', 'Lion', 'Mushroom'], correct: 1},
-					{icon: 'Decomposer', options: ['Grass', 'Lion', 'Mushroom'], correct: 2}
-				]
-			}
-		];
-		
-		function updateMiniProgress(){
-			const progress = (currentQuestion / questions.length) * 100;
-			miniProgressText.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
-			miniProgressBar.style.width = `${progress}%`;
-		}
-		
-		function showQuestion(){
-			updateMiniProgress();
-			const q = questions[currentQuestion];
-			
-			if(q.type === 'multiple-choice'){
-				showMultipleChoice(q);
-			}else if(q.type === 'matching'){
-				showMatching(q);
-			}
-		}
-		
-		function showMultipleChoice(q){
-			if(q.instruction){
-				levelInstructions.textContent = q.instruction;
-			}else{
-				levelInstructions.textContent = '';
-			}
-			let html = `<div class="quiz-question">${q.question}</div><div class="options">`;
-			q.options.forEach((opt, idx)=>{
-				html += `<button class="option-btn" data-idx="${idx}">${opt}</button>`;
-			});
-			html += '</div>';
-			answerArea.innerHTML = html;
-			
-			document.querySelectorAll('.option-btn').forEach(btn=>{
-				btn.addEventListener('click', ()=>{
-					const idx = parseInt(btn.dataset.idx);
-					if(idx === q.correct){
-						btn.classList.add('correct');
-						handleCorrect(correctAnswersRef, nextQuestion);
-					}else{
-						btn.classList.add('wrong');
-						handleWrong(()=>{
-							btn.classList.remove('wrong');
-						});
-					}
-				});
-			});
-		}
-		
-		function showMatching(q){
-			levelInstructions.textContent = '';
-			let html = `<div class="quiz-question">${q.question}</div><div class="matching-game">`;
-			q.pairs.forEach((pair, idx)=>{
-				html += `<div class="match-item">
-					<div class="match-icon" style="font-size:18px; font-weight:700;">${pair.icon}</div>
-					<select class="match-select" data-idx="${idx}">
-						<option value="">Select...</option>`;
-				pair.options.forEach((opt, optIdx)=>{
-					html += `<option value="${optIdx}">${opt}</option>`;
-				});
-				html += `</select></div>`;
-			});
-			html += '</div><button class="btn primary submit-btn" id="submit-match">Submit</button>';
-			answerArea.innerHTML = html;
-			
-			document.getElementById('submit-match').addEventListener('click', ()=>{
-				const selects = document.querySelectorAll('.match-select');
-				let allCorrect = true;
-				selects.forEach(sel=>{
-					const idx = parseInt(sel.dataset.idx);
-					const selected = parseInt(sel.value);
-					if(selected === q.pairs[idx].correct){
-						sel.classList.add('correct');
-						sel.disabled = true;
-					}else{
-						sel.classList.add('wrong');
-						allCorrect = false;
-					}
-				});
-				
-				if(allCorrect){
-					handleCorrect(correctAnswersRef, nextQuestion);
-				}else{
-					handleWrong(()=>{
-						selects.forEach(sel=>{
-							if(sel.classList.contains('wrong')){
-								sel.classList.remove('wrong');
-								sel.value = '';
-							}
-						});
-					});
-				}
-			});
-		}
-		
-		function nextQuestion(){
-			currentQuestion++;
-			if(currentQuestion < questions.length){
-				showQuestion();
-			}else{
-				finishGrade6();
-			}
-		}
-		
-		function finishGrade6(){
-			miniProgressBar.style.width = '100%';
-			miniProgressText.textContent = 'Complete!';
-			levelInstructions.textContent = `You got ${correctAnswersRef.count} out of ${questions.length} correct!`;
-			answerArea.innerHTML = '<p style="text-align:center; font-size:18px; color:#28a745;">🎉 Incredible work!</p>';
-			
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.clap, quote);
-			
-			if(session.mode==='fast'){
-				btnNext.disabled = false;
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-				if(session.completed>0 && session.completed%4===0){
-					const elapsed = Date.now()-session.startTime;
-					showToast(`🎉 You've completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-				}
-			}else{
-				// Normal mode - auto finish after short delay
-				setTimeout(()=>{
-					finishNormal();
-				}, 2000);
-			}
-		}
-		
-		showQuestion();
-	}
-
-	/* Grade 7 Mini-Game */
-	function startGrade7MiniGame(){
-		miniProgressWrap.style.display = 'block';
-		let currentQuestion = 0;
-		let correctAnswersRef = {count: 0};
-		
-		const questions = [
-			{
-				type: 'multiple-choice',
-				question: 'What is −6 + 9?',
-				options: ['2', '3', '4', '6'],
-				correct: 1
-			},
-			{
-				type: 'multiple-choice',
-				question: 'Which body system breaks down food into nutrients?',
-				options: ['Respiratory', 'Circulatory', 'Digestive', 'Nervous'],
-				correct: 2
-			},
-			{
-				type: 'fill-blank',
-				question: 'The force that pulls objects toward Earth is called ______',
-				correct: 'gravity'
-			},
-			{
-				type: 'matching',
-				question: 'Match each quantity to its SI unit',
-				pairs: [
-					{icon: 'Length', options: ['meter', 'kilogram', 'second'], correct: 0},
-					{icon: 'Mass', options: ['meter', 'kilogram', 'second'], correct: 1},
-					{icon: 'Time', options: ['meter', 'kilogram', 'second'], correct: 2}
-				]
-			}
-		];
-		
-		function updateMiniProgress(){
-			const progress = (currentQuestion / questions.length) * 100;
-			miniProgressText.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
-			miniProgressBar.style.width = `${progress}%`;
-		}
-		
-		function showQuestion(){
-			resetAttempts();
-			updateMiniProgress();
-			const q = questions[currentQuestion];
-			changeMascot(MASCOT.teaching, q.instruction || q.question, true);
-			
-			if(q.type === 'multiple-choice'){
-				showMultipleChoice(q);
-			}else if(q.type === 'fill-blank'){
-				showFillBlank(q);
-			}else if(q.type === 'matching'){
-				showMatching(q);
-			}
-		}
-		
-		function showMultipleChoice(q){
-			if(q.instruction){
-				levelInstructions.textContent = q.instruction;
-			}else{
-				levelInstructions.textContent = '';
-			}
-			let html = `<div class="quiz-question">${q.question}</div><div class="options">`;
-			q.options.forEach((opt, idx)=>{
-				html += `<button class="option-btn" data-idx="${idx}">${opt}</button>`;
-			});
-			html += '</div>';
-			answerArea.innerHTML = html;
-			
-			document.querySelectorAll('.option-btn').forEach(btn=>{
-				btn.addEventListener('click', ()=>{
-					const idx = parseInt(btn.dataset.idx);
-					if(idx === q.correct){
-						btn.classList.add('correct');
-						handleCorrect(correctAnswersRef, nextQuestion);
-					}else{
-						btn.classList.add('wrong');
-						handleWrong(()=>{
-							btn.classList.remove('wrong');
-						});
-					}
-				});
-			});
-		}
-		
-		function showFillBlank(q){
-			levelInstructions.textContent = '';
-			answerArea.innerHTML = `
-				<div class="quiz-question">${q.question}</div>
-				<div class="fill-blank">
-					<input type="text" id="fill-input" placeholder="Type your answer" />
-				</div>
-				<button class="btn primary submit-btn" id="submit-fill">Submit</button>
-			`;
-			
-			document.getElementById('submit-fill').addEventListener('click', ()=>{
-				const input = document.getElementById('fill-input');
-				const answer = input.value.trim().toLowerCase();
-				if(answer === q.correct.toLowerCase()){
-					input.classList.add('correct');
-					handleCorrect(correctAnswersRef, nextQuestion);
-				}else{
-					input.classList.add('wrong');
-					handleWrong(()=>{
-						input.classList.remove('wrong');
-						input.value = '';
-					});
-				}
-			});
-		}
-		
-		function showMatching(q){
-			levelInstructions.textContent = '';
-			let html = `<div class="quiz-question">${q.question}</div><div class="matching-game">`;
-			q.pairs.forEach((pair, idx)=>{
-				html += `<div class="match-item">
-					<div class="match-icon">${pair.icon}</div>
-					<select class="match-select" data-idx="${idx}">
-						<option value="">Select...</option>`;
-				pair.options.forEach((opt, optIdx)=>{
-					html += `<option value="${optIdx}">${opt}</option>`;
-				});
-				html += `</select></div>`;
-			});
-			html += '</div><button class="btn primary submit-btn" id="submit-match">Submit</button>';
-			answerArea.innerHTML = html;
-			
-			document.getElementById('submit-match').addEventListener('click', ()=>{
-				const selects = document.querySelectorAll('.match-select');
-				let allCorrect = true;
-				selects.forEach(sel=>{
-					const idx = parseInt(sel.dataset.idx);
-					const selected = parseInt(sel.value);
-					if(selected === q.pairs[idx].correct){
-						sel.classList.add('correct');
-						sel.disabled = true;
-					}else{
-						sel.classList.add('wrong');
-						allCorrect = false;
-					}
-				});
-				
-				if(allCorrect){
-					handleCorrect(correctAnswersRef, nextQuestion);
-				}else{
-					handleWrong(()=>{
-						selects.forEach(sel=>{
-							if(sel.classList.contains('wrong')){
-								sel.classList.remove('wrong');
-								sel.value = '';
-							}
-						});
-					});
-				}
-			});
-		}
-		
-		function nextQuestion(){
-			currentQuestion++;
-			if(currentQuestion < questions.length){
-				showQuestion();
-			}else{
-				finishGrade7();
-			}
-		}
-		
-		function finishGrade7(){
-			miniProgressBar.style.width = '100%';
-			miniProgressText.textContent = 'Complete!';
-			levelInstructions.textContent = `You got ${correctAnswersRef.count} out of ${questions.length} correct!`;
-			answerArea.innerHTML = '<p style="text-align:center; font-size:18px; color:#28a745;">🎉 Outstanding performance!</p>';
-			
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.clap, quote);
-			
-			if(session.mode==='fast'){
-				btnNext.disabled = false;
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-				if(session.completed>0 && session.completed%4===0){
-					const elapsed = Date.now()-session.startTime;
-					showToast(`🎉 You've completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-				}
-			}else{
-				// Normal mode - auto finish after short delay
-				setTimeout(()=>{
-					finishNormal();
-				}, 2000);
-			}
-		}
-		
-		showQuestion();
-	}
-
-	/* Grade 8 Mini-Game */
-	function startGrade8MiniGame(){
-		miniProgressWrap.style.display = 'block';
-		let currentQuestion = 0;
-		let correctAnswersRef = {count: 0};
-		
-		const questions = [
-			{
-				type: 'multiple-choice',
-				question: 'Which particle has a negative charge?',
-				options: ['Proton', 'Neutron', 'Electron', 'Nucleus'],
-				correct: 2
-			},
-			{
-				type: 'multiple-choice',
-				question: 'Neither the students nor the teacher ___ arriving late.',
-				instruction: 'Choose the correct verb',
-				options: ['is', 'are'],
-				correct: 0
-			},
-			{
-				type: 'multiple-choice',
-				question: 'Circle the correctly spelled word',
-				options: ['occurence', 'occurrence'],
-				correct: 1
-			}
-		];
-		
-		function updateMiniProgress(){
-			const progress = (currentQuestion / questions.length) * 100;
-			miniProgressText.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
-			miniProgressBar.style.width = `${progress}%`;
-		}
-		
-		function showQuestion(){
-			resetAttempts();
-			updateMiniProgress();
-			const q = questions[currentQuestion];
-			changeMascot(MASCOT.teaching, q.instruction || q.question, true);
-			showMultipleChoice(q);
-		}
-		
-		function showMultipleChoice(q){
-			if(q.instruction){
-				levelInstructions.textContent = q.instruction;
-			}else{
-				levelInstructions.textContent = '';
-			}
-			let html = `<div class="quiz-question">${q.question}</div><div class="options">`;
-			q.options.forEach((opt, idx)=>{
-				html += `<button class="option-btn" data-idx="${idx}">${opt}</button>`;
-			});
-			html += '</div>';
-			answerArea.innerHTML = html;
-			
-			document.querySelectorAll('.option-btn').forEach(btn=>{
-				btn.addEventListener('click', ()=>{
-					const idx = parseInt(btn.dataset.idx);
-					if(idx === q.correct){
-						btn.classList.add('correct');
-						handleCorrect(correctAnswersRef, nextQuestion);
-					}else{
-						btn.classList.add('wrong');
-						handleWrong(()=>{
-							btn.classList.remove('wrong');
-						});
-					}
-				});
-			});
-		}
-		
-		function nextQuestion(){
-			currentQuestion++;
-			if(currentQuestion < questions.length){
-				showQuestion();
-			}else{
-				finishGrade8();
-			}
-		}
-		
-		function finishGrade8(){
-			miniProgressBar.style.width = '100%';
-			miniProgressText.textContent = 'Complete!';
-			levelInstructions.textContent = `You got ${correctAnswersRef.count} out of ${questions.length} correct!`;
-			answerArea.innerHTML = '<p style="text-align:center; font-size:18px; color:#28a745;">🎉 Exceptional work!</p>';
-			
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.clap, quote);
-			
-			if(session.mode==='fast'){
-				btnNext.disabled = false;
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-				if(session.completed>0 && session.completed%4===0){
-					const elapsed = Date.now()-session.startTime;
-					showToast(`🎉 You've completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-				}
-			}else{
-				// Normal mode - auto finish after short delay
-				setTimeout(()=>{
-					finishNormal();
-				}, 2000);
-			}
-		}
-		
-		showQuestion();
-	}
-
-	/* Grade 9 Mini-Game */
-	function startGrade9MiniGame(){
-		miniProgressWrap.style.display = 'block';
-		let currentQuestion = 0;
-		let correctAnswersRef = {count: 0};
-		
-		const questions = [
-			{
-				type: 'multiple-choice',
-				question: 'Which is a compound?',
-				options: ['O₂', 'CO₂', 'Ne', 'Fe'],
-				correct: 1
-			},
-			{
-				type: 'multiple-choice',
-				question: 'Which word means the same as analyze?',
-				options: ['Argue', 'Examine', 'Avoid', 'Pretend'],
-				correct: 1
-			},
-			{
-				type: 'multiple-choice',
-				question: 'Neither of the answers ___ correct.',
-				instruction: 'Choose the correct verb',
-				options: ['is', 'are'],
-				correct: 0
-			},
-			{
-				type: 'multiple-choice',
-				question: 'Choose the correctly spelled word',
-				options: ['seperate', 'separate'],
-				correct: 1
-			}
-		];
-		
-		function updateMiniProgress(){
-			const progress = (currentQuestion / questions.length) * 100;
-			miniProgressText.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
-			miniProgressBar.style.width = `${progress}%`;
-		}
-		
-		function showQuestion(){
-			resetAttempts();
-			updateMiniProgress();
-			const q = questions[currentQuestion];
-			changeMascot(MASCOT.teaching, q.instruction || q.question, true);
-			showMultipleChoice(q);
-		}
-		
-		function showMultipleChoice(q){
-			if(q.instruction){
-				levelInstructions.textContent = q.instruction;
-			}else{
-				levelInstructions.textContent = '';
-			}
-			let html = `<div class="quiz-question">${q.question}</div><div class="options">`;
-			q.options.forEach((opt, idx)=>{
-				html += `<button class="option-btn" data-idx="${idx}">${opt}</button>`;
-			});
-			html += '</div>';
-			answerArea.innerHTML = html;
-			
-			document.querySelectorAll('.option-btn').forEach(btn=>{
-				btn.addEventListener('click', ()=>{
-					const idx = parseInt(btn.dataset.idx);
-					if(idx === q.correct){
-						btn.classList.add('correct');
-						handleCorrect(correctAnswersRef, nextQuestion);
-					}else{
-						btn.classList.add('wrong');
-						handleWrong(()=>{
-							btn.classList.remove('wrong');
-						});
-					}
-				});
-			});
-		}
-		
-		function nextQuestion(){
-			currentQuestion++;
-			if(currentQuestion < questions.length){
-				showQuestion();
-			}else{
-				finishGrade9();
-			}
-		}
-		
-		function finishGrade9(){
-			miniProgressBar.style.width = '100%';
-			miniProgressText.textContent = 'Complete!';
-			levelInstructions.textContent = `You got ${correctAnswersRef.count} out of ${questions.length} correct!`;
-			answerArea.innerHTML = '<p style="text-align:center; font-size:18px; color:#28a745;">🎉 Phenomenal work!</p>';
-			
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.clap, quote);
-			
-			if(session.mode==='fast'){
-				btnNext.disabled = false;
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-				if(session.completed>0 && session.completed%4===0){
-					const elapsed = Date.now()-session.startTime;
-					showToast(`🎉 You've completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-				}
-			}else{
-				// Normal mode - auto finish after short delay
-				setTimeout(()=>{
-					finishNormal();
-				}, 2000);
-			}
-		}
-		
-		showQuestion();
-	}
-
-	/* Grade 10 Mini-Game */
-	function startGrade10MiniGame(){
-		miniProgressWrap.style.display = 'block';
-		let currentQuestion = 0;
-		let correctAnswersRef = {count: 0};
-		
-		const questions = [
-			{
-				type: 'multiple-choice',
-				question: 'Solve for x: x + 8 = 20',
-				options: ['10', '12', '14', '18'],
-				correct: 1
-			},
-			{
-				type: 'multiple-choice',
-				question: 'She _____ her homework before dinner.',
-				instruction: 'Choose the correct verb tense',
-				options: ['finish', 'finished'],
-				correct: 1
-			},
-			{
-				type: 'matching',
-				question: 'Match each organ to what it does',
-				pairs: [
-					{icon: 'Heart', options: ['pumps blood', 'takes in oxygen', 'helps digest food'], correct: 0},
-					{icon: 'Lungs', options: ['pumps blood', 'takes in oxygen', 'helps digest food'], correct: 1},
-					{icon: 'Stomach', options: ['pumps blood', 'takes in oxygen', 'helps digest food'], correct: 2}
-				]
-			},
-			{
-				type: 'multiple-choice',
-				question: 'Choose the correct spelling',
-				options: ['finaly', 'finally'],
-				correct: 1
-			}
-		];
-		
-		function updateMiniProgress(){
-			const progress = (currentQuestion / questions.length) * 100;
-			miniProgressText.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
-			miniProgressBar.style.width = `${progress}%`;
-		}
-		
-		function showQuestion(){
-			updateMiniProgress();
-			const q = questions[currentQuestion];
-			
-			if(q.type === 'multiple-choice'){
-				showMultipleChoice(q);
-			}else if(q.type === 'matching'){
-				showMatching(q);
-			}
-		}
-		
-		function showMultipleChoice(q){
-			if(q.instruction){
-				levelInstructions.textContent = q.instruction;
-			}else{
-				levelInstructions.textContent = '';
-			}
-			let html = `<div class="quiz-question">${q.question}</div><div class="options">`;
-			q.options.forEach((opt, idx)=>{
-				html += `<button class="option-btn" data-idx="${idx}">${opt}</button>`;
-			});
-			html += '</div>';
-			answerArea.innerHTML = html;
-			
-			document.querySelectorAll('.option-btn').forEach(btn=>{
-				btn.addEventListener('click', ()=>{
-					const idx = parseInt(btn.dataset.idx);
-					if(idx === q.correct){
-						btn.classList.add('correct');
-						handleCorrect(correctAnswersRef, nextQuestion);
-					}else{
-						btn.classList.add('wrong');
-						handleWrong(()=>{
-							btn.classList.remove('wrong');
-						});
-					}
-				});
-			});
-		}
-		
-		function showMatching(q){
-			levelInstructions.textContent = '';
-			let html = `<div class="quiz-question">${q.question}</div><div class="matching-game">`;
-			q.pairs.forEach((pair, idx)=>{
-				html += `<div class="match-item">
-					<div class="match-icon">${pair.icon}</div>
-					<select class="match-select" data-idx="${idx}">
-						<option value="">Select...</option>`;
-				pair.options.forEach((opt, optIdx)=>{
-					html += `<option value="${optIdx}">${opt}</option>`;
-				});
-				html += `</select></div>`;
-			});
-			html += '</div><button class="btn primary submit-btn" id="submit-match">Submit</button>';
-			answerArea.innerHTML = html;
-			
-			document.getElementById('submit-match').addEventListener('click', ()=>{
-				const selects = document.querySelectorAll('.match-select');
-				let allCorrect = true;
-				selects.forEach(sel=>{
-					const idx = parseInt(sel.dataset.idx);
-					const selected = parseInt(sel.value);
-					if(selected === q.pairs[idx].correct){
-						sel.classList.add('correct');
-						sel.disabled = true;
-					}else{
-						sel.classList.add('wrong');
-						allCorrect = false;
-					}
-				});
-				
-				if(allCorrect){
-					handleCorrect(correctAnswersRef, nextQuestion);
-				}else{
-					handleWrong(()=>{
-						selects.forEach(sel=>{
-							if(sel.classList.contains('wrong')){
-								sel.classList.remove('wrong');
-								sel.value = '';
-							}
-						});
-					});
-				}
-			});
-		}
-		
-		function nextQuestion(){
-			currentQuestion++;
-			if(currentQuestion < questions.length){
-				showQuestion();
-			}else{
-				finishGrade10();
-			}
-		}
-		
-		function finishGrade10(){
-			miniProgressBar.style.width = '100%';
-			miniProgressText.textContent = 'Complete!';
-			levelInstructions.textContent = `You got ${correctAnswersRef.count} out of ${questions.length} correct!`;
-			answerArea.innerHTML = '<p style="text-align:center; font-size:18px; color:#28a745;">🎉 Outstanding achievement!</p>';
-			
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.clap, quote);
-			
-			if(session.mode==='fast'){
-				btnNext.disabled = false;
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-				if(session.completed>0 && session.completed%4===0){
-					const elapsed = Date.now()-session.startTime;
-					showToast(`🎉 You've completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-				}
-			}else{
-				// Normal mode - auto finish after short delay
-				setTimeout(()=>{
-					finishNormal();
-				}, 2000);
-			}
-		}
-		
-		showQuestion();
-	}
-
-	/* Grade 11 Mini-Game */
-	function startGrade11MiniGame(){
-		miniProgressWrap.style.display = 'block';
-		let currentQuestion = 0;
-		let correctAnswersRef = {count: 0};
-		
-		const questions = [
-			{
-				type: 'multiple-choice',
-				question: 'Speed is distance divided by ______.',
-				options: ['mass', 'force', 'time', 'energy'],
-				correct: 2
-			},
-			{
-				type: 'fill-blank',
-				question: '10% of 250 = ______',
-				correct: '25'
-			},
-			{
-				type: 'multiple-choice',
-				question: 'The word "beneficial" most nearly means…',
-				options: ['harmful', 'noisy', 'helpful', 'rare'],
-				correct: 2
-			},
-			{
-				type: 'matching',
-				question: 'Match each body system to its main function',
-				pairs: [
-					{icon: 'Circulatory', options: ['moves blood/nutrients', 'gas exchange (O₂ in, CO₂ out)', 'breaks down food'], correct: 0},
-					{icon: 'Respiratory', options: ['moves blood/nutrients', 'gas exchange (O₂ in, CO₂ out)', 'breaks down food'], correct: 1},
-					{icon: 'Digestive', options: ['moves blood/nutrients', 'gas exchange (O₂ in, CO₂ out)', 'breaks down food'], correct: 2}
-				]
-			}
-		];
-		
-		function updateMiniProgress(){
-			const progress = (currentQuestion / questions.length) * 100;
-			miniProgressText.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
-			miniProgressBar.style.width = `${progress}%`;
-		}
-		
-		function showQuestion(){
-			resetAttempts();
-			updateMiniProgress();
-			const q = questions[currentQuestion];
-			changeMascot(MASCOT.teaching, q.instruction || q.question, true);
-			
-			if(q.type === 'multiple-choice'){
-				showMultipleChoice(q);
-			}else if(q.type === 'fill-blank'){
-				showFillBlank(q);
-			}else if(q.type === 'matching'){
-				showMatching(q);
-			}
-		}
-		
-		function showMultipleChoice(q){
-			if(q.instruction){
-				levelInstructions.textContent = q.instruction;
-			}else{
-				levelInstructions.textContent = '';
-			}
-			let html = `<div class="quiz-question">${q.question}</div><div class="options">`;
-			q.options.forEach((opt, idx)=>{
-				html += `<button class="option-btn" data-idx="${idx}">${opt}</button>`;
-			});
-			html += '</div>';
-			answerArea.innerHTML = html;
-			
-			document.querySelectorAll('.option-btn').forEach(btn=>{
-				btn.addEventListener('click', ()=>{
-					const idx = parseInt(btn.dataset.idx);
-					if(idx === q.correct){
-						btn.classList.add('correct');
-						handleCorrect(correctAnswersRef, nextQuestion);
-					}else{
-						btn.classList.add('wrong');
-						handleWrong(()=>{
-							btn.classList.remove('wrong');
-						});
-					}
-				});
-			});
-		}
-		
-		function showFillBlank(q){
-			levelInstructions.textContent = '';
-			answerArea.innerHTML = `
-				<div class="quiz-question">${q.question}</div>
-				<div class="fill-blank">
-					<input type="number" id="fill-input" placeholder="?" />
-				</div>
-				<button class="btn primary submit-btn" id="submit-fill">Submit</button>
-			`;
-			
-			document.getElementById('submit-fill').addEventListener('click', ()=>{
-				const input = document.getElementById('fill-input');
-				if(input.value === q.correct){
-					input.classList.add('correct');
-					correctAnswersRef.count++;
-					changeMascot(MASCOT.happy, 'Perfect!');
-					setTimeout(nextQuestion, 1000);
-				}else{
-					input.classList.add('wrong');
-					changeMascot(MASCOT.sad, 'Not quite!');
-					setTimeout(()=>{
-						input.classList.remove('wrong');
-						input.value = '';
-						changeMascot(MASCOT.teaching, 'Calculate carefully!');
-					}, 1000);
-				}
-			});
-		}
-		
-		function showMatching(q){
-			levelInstructions.textContent = '';
-			let html = `<div class="quiz-question">${q.question}</div><div class="matching-game">`;
-			q.pairs.forEach((pair, idx)=>{
-				html += `<div class="match-item">
-					<div class="match-icon">${pair.icon}</div>
-					<select class="match-select" data-idx="${idx}">
-						<option value="">Select...</option>`;
-				pair.options.forEach((opt, optIdx)=>{
-					html += `<option value="${optIdx}">${opt}</option>`;
-				});
-				html += `</select></div>`;
-			});
-			html += '</div><button class="btn primary submit-btn" id="submit-match">Submit</button>';
-			answerArea.innerHTML = html;
-			
-			document.getElementById('submit-match').addEventListener('click', ()=>{
-				const selects = document.querySelectorAll('.match-select');
-				let allCorrect = true;
-				selects.forEach(sel=>{
-					const idx = parseInt(sel.dataset.idx);
-					const selected = parseInt(sel.value);
-					if(selected === q.pairs[idx].correct){
-						sel.classList.add('correct');
-						sel.disabled = true;
-					}else{
-						sel.classList.add('wrong');
-						allCorrect = false;
-					}
-				});
-				
-				if(allCorrect){
-					handleCorrect(correctAnswersRef, nextQuestion);
-				}else{
-					handleWrong(()=>{
-						selects.forEach(sel=>{
-							if(sel.classList.contains('wrong')){
-								sel.classList.remove('wrong');
-								sel.value = '';
-							}
-						});
-					});
-				}
-			});
-		}
-		
-		function nextQuestion(){
-			currentQuestion++;
-			if(currentQuestion < questions.length){
-				showQuestion();
-			}else{
-				finishGrade11();
-			}
-		}
-		
-		function finishGrade11(){
-			miniProgressBar.style.width = '100%';
-			miniProgressText.textContent = 'Complete!';
-			levelInstructions.textContent = `You got ${correctAnswersRef.count} out of ${questions.length} correct!`;
-			answerArea.innerHTML = '<p style="text-align:center; font-size:18px; color:#28a745;">🎉 Spectacular performance!</p>';
-			
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.clap, quote);
-			
-			if(session.mode==='fast'){
-				btnNext.disabled = false;
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-				if(session.completed>0 && session.completed%4===0){
-					const elapsed = Date.now()-session.startTime;
-					showToast(`🎉 You've completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-				}
-			}else{
-				// Normal mode - auto finish after short delay
-				setTimeout(()=>{
-					finishNormal();
-				}, 2000);
-			}
-		}
-		
-		showQuestion();
-	}
-
-	/* Grade 12 Mini-Game - FINAL GRADE! */
-	function startGrade12MiniGame(){
-		miniProgressWrap.style.display = 'block';
-		let currentQuestion = 0;
-		let correctAnswersRef = {count: 0};
-		
-		const questions = [
-			{
-				type: 'multiple-choice',
-				question: 'Plants mainly release ______ during photosynthesis.',
-				options: ['Nitrogen', 'Carbon dioxide', 'Oxygen', 'Helium'],
-				correct: 2
-			},
-			{
-				type: 'fill-blank',
-				question: 'DNA is found in the cell ______',
-				correct: 'nucleus'
-			},
-			{
-				type: 'multiple-choice',
-				question: 'The word "evaluate" most nearly means…',
-				options: ['ignore', 'assess', 'confuse', 'announce'],
-				correct: 1
-			},
-			{
-				type: 'multiple-choice',
-				question: 'Choose the correctly spelled word',
-				options: ['reccomend', 'recommend'],
-				correct: 1
-			},
-			{
-				type: 'matching',
-				question: 'Match each literary term to its definition',
-				pairs: [
-					{icon: 'Simile', options: ['comparison using "like" or "as"', 'direct comparison without "like/as"', 'deliberate exaggeration'], correct: 0},
-					{icon: 'Metaphor', options: ['comparison using "like" or "as"', 'direct comparison without "like/as"', 'deliberate exaggeration'], correct: 1},
-					{icon: 'Hyperbole', options: ['comparison using "like" or "as"', 'direct comparison without "like/as"', 'deliberate exaggeration'], correct: 2}
-				]
-			}
-		];
-		
-		function updateMiniProgress(){
-			const progress = (currentQuestion / questions.length) * 100;
-			miniProgressText.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
-			miniProgressBar.style.width = `${progress}%`;
-		}
-		
-		function showQuestion(){
-			resetAttempts();
-			updateMiniProgress();
-			const q = questions[currentQuestion];
-			changeMascot(MASCOT.teaching, q.instruction || q.question, true);
-			
-			if(q.type === 'multiple-choice'){
-				showMultipleChoice(q);
-			}else if(q.type === 'fill-blank'){
-				showFillBlank(q);
-			}else if(q.type === 'matching'){
-				showMatching(q);
-			}
-		}
-		
-		function showMultipleChoice(q){
-			if(q.instruction){
-				levelInstructions.textContent = q.instruction;
-			}else{
-				levelInstructions.textContent = '';
-			}
-			let html = `<div class="quiz-question">${q.question}</div><div class="options">`;
-			q.options.forEach((opt, idx)=>{
-				html += `<button class="option-btn" data-idx="${idx}">${opt}</button>`;
-			});
-			html += '</div>';
-			answerArea.innerHTML = html;
-			
-			document.querySelectorAll('.option-btn').forEach(btn=>{
-				btn.addEventListener('click', ()=>{
-					const idx = parseInt(btn.dataset.idx);
-					if(idx === q.correct){
-						btn.classList.add('correct');
-						handleCorrect(correctAnswersRef, nextQuestion);
-					}else{
-						btn.classList.add('wrong');
-						handleWrong(()=>{
-							btn.classList.remove('wrong');
-						});
-					}
-				});
-			});
-		}
-		
-		function showFillBlank(q){
-			levelInstructions.textContent = '';
-			answerArea.innerHTML = `
-				<div class="quiz-question">${q.question}</div>
-				<div class="fill-blank">
-					<input type="text" id="fill-input" placeholder="Type your answer" />
-				</div>
-				<button class="btn primary submit-btn" id="submit-fill">Submit</button>
-			`;
-			
-			document.getElementById('submit-fill').addEventListener('click', ()=>{
-				const input = document.getElementById('fill-input');
-				const answer = input.value.trim().toLowerCase();
-				if(answer === q.correct.toLowerCase()){
-					input.classList.add('correct');
-					handleCorrect(correctAnswersRef, nextQuestion);
-				}else{
-					input.classList.add('wrong');
-					handleWrong(()=>{
-						input.classList.remove('wrong');
-						input.value = '';
-					});
-				}
-			});
-		}
-		
-		function showMatching(q){
-			levelInstructions.textContent = '';
-			let html = `<div class="quiz-question">${q.question}</div><div class="matching-game">`;
-			q.pairs.forEach((pair, idx)=>{
-				html += `<div class="match-item">
-					<div class="match-icon">${pair.icon}</div>
-					<select class="match-select" data-idx="${idx}">
-						<option value="">Select...</option>`;
-				pair.options.forEach((opt, optIdx)=>{
-					html += `<option value="${optIdx}">${opt}</option>`;
-				});
-				html += `</select></div>`;
-			});
-			html += '</div><button class="btn primary submit-btn" id="submit-match">Submit</button>';
-			answerArea.innerHTML = html;
-			
-			document.getElementById('submit-match').addEventListener('click', ()=>{
-				const selects = document.querySelectorAll('.match-select');
-				let allCorrect = true;
-				selects.forEach(sel=>{
-					const idx = parseInt(sel.dataset.idx);
-					const selected = parseInt(sel.value);
-					if(selected === q.pairs[idx].correct){
-						sel.classList.add('correct');
-						sel.disabled = true;
-					}else{
-						sel.classList.add('wrong');
-						allCorrect = false;
-					}
-				});
-				
-				if(allCorrect){
-					correctAnswersRef.count++;
-					changeMascot(MASCOT.happy, 'Outstanding!');
-					setTimeout(nextQuestion, 1000);
-				}else{
-					changeMascot(MASCOT.sad, 'Some matches are wrong. Try again!');
-					setTimeout(()=>{
-						selects.forEach(sel=>{
-							if(sel.classList.contains('wrong')){
-								sel.classList.remove('wrong');
-								sel.value = '';
-							}
-						});
-						changeMascot(MASCOT.teaching, q.question);
-					}, 1500);
-				}
-			});
-		}
-		
-		function nextQuestion(){
-			currentQuestion++;
-			if(currentQuestion < questions.length){
-				showQuestion();
-			}else{
-				finishGrade12();
-			}
-		}
-		
-		function finishGrade12(){
-			miniProgressBar.style.width = '100%';
-			miniProgressText.textContent = 'Complete!';
-			levelInstructions.textContent = `You got ${correctAnswersRef.count} out of ${questions.length} correct!`;
-			answerArea.innerHTML = '<p style="text-align:center; font-size:24px; color:#28a745;">🎓 OSSD COMPLETE! 🎓</p>';
-			
-			const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-			changeMascot(MASCOT.clap, quote);
-			
-			if(session.mode==='fast'){
-				btnNext.disabled = false;
-				session.completed = clamp(session.completed+1, 0, 12);
-				progressText.textContent = `${session.completed}/12`;
-				progressBar.style.width = `${(session.completed/12)*100}%`;
-			}else{
-				// Normal mode - auto finish after short delay
-				setTimeout(()=>{
-					finishNormal();
-				}, 2000);
-			}
-		}
-		
-		showQuestion();
-	}
-
-	btnComplete.addEventListener('click', ()=>{
-		// Placeholder success path
-		const quote = FUNNY_COMMENTS[Math.floor(Math.random()*FUNNY_COMMENTS.length)];
-		changeMascot(MASCOT.happy, quote);
-		btnNext.disabled = false;
-		if(session.mode==='fast'){
-			session.completed = clamp(session.completed+1, 0, 12);
-			progressText.textContent = `${session.completed}/12`;
-			progressBar.style.width = `${(session.completed/12)*100}%`;
-			if(session.completed>0 && session.completed%4===0){
-				const elapsed = Date.now()-session.startTime;
-				showToast(`🎉 You’ve completed ${session.completed} grades in ${fmtDuration(elapsed)}!`);
-			}
-		}
-	});
-
-	btnNext.addEventListener('click', ()=>{
-		const g = session.currentGrade;
-		if(session.mode==='normal'){
-			finishNormal();
-			return;
-		}
-		if(g>=12){
-			finishJourney();
-			return;
-		}
-		session.currentGrade = g+1;
-		loadGrade(session.currentGrade);
-	});
-
-btnExit.addEventListener('click', ()=>{
-		// On Fast-Track, show reward screen with their progress
-		if(session.mode==='fast' && session.startTime && session.completed>0){
-			finishJourney();
-		}else{
-			stopTimer();
-			navigate('home');
-		}
-	});
-
-	/* Finishers */
-function finishNormal(){
-		// Show reward screen for Normal Mode too
-		const gradeName = `Grade ${session.currentGrade}`;
-		rewardMessage.textContent = `🎉 Congratulations, ${session.name}! You've completed ${gradeName}!`;
-		canAccessReward = true;
-		navigate('reward');
-		confettiBurst();
-		// Don't add to leaderboard for normal mode (only single grade)
-}
-
-	function finishJourney(){
-		stopTimer();
-		session.endTime = Date.now();
-		const elapsed = session.endTime - session.startTime;
-		const gradesDone = session.completed; // Use actual completed count
-		const endGrade = session.startGrade + gradesDone - 1;
-		const gradeRange = gradesDone === 1 ? `Grade ${session.startGrade}` : `Grades ${session.startGrade} - ${endGrade}`;
-		rewardMessage.textContent = `🎉 Congratulations, ${session.name}! You've completed ${gradeRange} in ${fmtDuration(elapsed)}!`;
-		canAccessReward = true; // Unlock reward page
-		navigate('reward');
-		confettiBurst();
-		updateLeaderboard({ name: session.name, grades: gradesDone, ms: elapsed });
-	}
-
-	/* Leaderboard */
-	function readLeaderboard(){
-		try{
-			return JSON.parse(localStorage.getItem('flexi:leaderboard')||'[]');
-		}catch{ return []; }
-	}
-	function writeLeaderboard(rows){
-		localStorage.setItem('flexi:leaderboard', JSON.stringify(rows.slice(0,25)));
-	}
-	function compareRows(a,b){
-		if(b.grades!==a.grades) return b.grades-a.grades; // more grades first
-		return a.ms-b.ms; // faster first
-	}
-	function updateLeaderboard(entry){
-		const rows = readLeaderboard();
-		rows.push(entry);
-		rows.sort(compareRows);
-		writeLeaderboard(rows);
-	}
-	function deleteEntry(index){
-		const rows = readLeaderboard();
-		rows.splice(index, 1);
-		writeLeaderboard(rows);
-		renderLeaderboard();
-		showToast('Entry deleted');
-	}
-	function renderLeaderboard(){
-		const rows = readLeaderboard();
-		leaderboardList.innerHTML = '';
-		rows.forEach((r, idx)=>{
-			const li = document.createElement('li');
-			li.innerHTML = `
-				<span>${escapeHtml(r.name)}</span>
-				<span class="leader-stats">
-					<span>${r.grades} Grades – ${fmtDuration(r.ms)}</span>
-					<button class="btn-delete" data-index="${idx}" aria-label="Delete entry">×</button>
-				</span>
-			`;
-			leaderboardList.appendChild(li);
-		});
-		// Attach delete handlers
-		document.querySelectorAll('.btn-delete').forEach(btn=>{
-			btn.addEventListener('click', (e)=>{
-				const index = parseInt(e.target.dataset.index, 10);
-				deleteEntry(index);
-			});
-		});
-	}
-	function escapeHtml(s){
-		return s.replace(/[&<>"]+/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
-	}
-
-	btnBackHome.addEventListener('click', ()=> navigate('home'));
-	btnClearLeaderboard.addEventListener('click', ()=> {
-		localStorage.removeItem('flexi:leaderboard');
-		renderLeaderboard();
-		showToast('Leaderboard cleared');
-	});
-	btnViewLeaderboard.addEventListener('click', ()=> navigate('leaderboard'));
-	btnPlayAgain.addEventListener('click', ()=> {
-		canAccessReward = false; // Reset reward access
-		navigate('home');
-	});
-
-	/* Confetti (simple canvas) */
-	const canvas = document.getElementById('confetti-canvas');
-	const ctx = canvas.getContext('2d');
-	let confettiItems = [];
-	function resizeCanvas(){
-		canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-	}
-	function confettiBurst(){
-		resizeCanvas();
-		confettiItems = Array.from({length: 180}, ()=>({
-			x: Math.random()*canvas.width,
-			y: -20 - Math.random()*canvas.height*0.3,
-			s: 6+Math.random()*8,
-			vy: 2+Math.random()*3,
-			vx: -1+Math.random()*2,
-			rot: Math.random()*Math.PI,
-			vr: -0.1+Math.random()*0.2,
-			c: Math.random()>0.5? '#f06143' : '#00475a'
-		}));
-		requestAnimationFrame(tickConfetti);
-	}
-	function tickConfetti(){
-		ctx.clearRect(0,0,canvas.width,canvas.height);
-		let alive = false;
-		for(const p of confettiItems){
-			p.x += p.vx; p.y += p.vy; p.rot += p.vr;
-			if(p.y<canvas.height+20){ alive = true; }
-			ctx.save();
-			ctx.translate(p.x, p.y);
-			ctx.rotate(p.rot);
-			ctx.fillStyle = p.c;
-			ctx.fillRect(-p.s/2, -p.s/2, p.s, p.s);
-			ctx.restore();
-		}
-		if(alive) requestAnimationFrame(tickConfetti);
-	}
-	window.addEventListener('resize', resizeCanvas);
-
-	/* Certificate Page */
+	let state = freshState();
+	let timerId = null;
 	let cameraStream = null;
 
-	btnDownloadCertificate.addEventListener('click', ()=>{
-		// Populate certificate with student info
-		certStudentName.textContent = session.name;
-		if(session.mode === 'normal'){
-			certAchievement.textContent = `Grade ${session.currentGrade}`;
-		}else{
-			const endGrade = session.startGrade + session.completed - 1;
-			certAchievement.textContent = session.completed === 1 ? `Grade ${session.startGrade}` : `Grades ${session.startGrade} - ${endGrade}`;
-		}
-		const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-		certDateValue.textContent = today;
-		
-		// Reset camera state
-		photoCanvas.classList.remove('show');
-		cameraPreview.classList.remove('hide');
-		btnRetakePhoto.style.display = 'none';
-		btnCapturePhoto.style.display = 'inline-block';
-		
-		// Start camera
-		startCamera();
-		navigate('certificate');
-	});
+	app.addEventListener("submit", handleSubmit);
+	app.addEventListener("click", handleClick);
+	window.addEventListener("hashchange", syncRoute);
+	window.addEventListener("load", syncRoute);
 
-	function startCamera(){
-		if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
-			navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
-				.then(stream => {
-					cameraStream = stream;
-					cameraPreview.srcObject = stream;
-				})
-				.catch(err => {
-					console.error('Camera error:', err);
-					showToast('Camera not available');
+	function handleSubmit(event) {
+		const form = event.target.closest("form");
+		if (!form) return;
+		event.preventDefault();
+
+		if (form.dataset.form === "start") {
+			const data = new FormData(form);
+			const name = String(data.get("name") || "").trim();
+			const startGrade = Number(data.get("startGrade"));
+			const mode = String(data.get("mode") || "challenge");
+
+			if (!name || !gradeById(startGrade)) return;
+			startRun({ name, startGrade, mode });
+			return;
+		}
+
+		if (form.dataset.form === "answer") {
+			checkAnswer(form);
+		}
+	}
+
+	function handleClick(event) {
+		const actionTarget = event.target.closest("[data-action]");
+		if (!actionTarget) return;
+
+		switch (actionTarget.dataset.action) {
+			case "leaderboard":
+				navigate("leaderboard");
+				break;
+			case "home":
+				stopClock();
+				state = freshState();
+				navigate("home");
+				break;
+			case "quit-run":
+				stopClock();
+				state = freshState();
+				navigate("home");
+				break;
+			case "continue":
+				continueAfterCorrect();
+				break;
+			case "advance-grade":
+				advanceFromGradeComplete();
+				break;
+			case "admin-pass-grade":
+				adminPassGrade();
+				break;
+			case "restart-run":
+				startRun({
+					name: state.playerName,
+					startGrade: state.startGrade,
+					mode: state.mode
 				});
-		}else{
-			showToast('Camera not supported on this device');
+				break;
+			case "view-certificate":
+				navigate("certificate");
+				break;
+			case "back-reward":
+				stopCertificateCamera();
+				navigate("reward");
+				break;
+			case "capture-selfie":
+				captureSelfie();
+				break;
+			case "retake-selfie":
+				retakeSelfie();
+				break;
+			case "print-certificate":
+				if (!state.selfieDataUrl) {
+					state.cameraError = "Capture a selfie before printing.";
+					render();
+					break;
+				}
+				window.print();
+				break;
+			case "clear-leaderboard":
+				if (window.confirm("Clear all leaderboard entries?")) {
+					localStorage.removeItem(STORAGE_KEYS.leaderboard);
+					render();
+				}
+				break;
 		}
 	}
 
-	function stopCamera(){
-		if(cameraStream){
-			cameraStream.getTracks().forEach(track => track.stop());
-			cameraStream = null;
+	function startRun(setup) {
+		saveLastSetup(setup);
+		state = {
+			...freshState(),
+			playerName: setup.name,
+			mode: setup.mode,
+			startGrade: setup.startGrade,
+			currentGrade: setup.startGrade,
+			startedAt: Date.now()
+		};
+		startClock();
+		navigate("game");
+		render();
+	}
+
+	function checkAnswer(form) {
+		if (state.phase !== "question") return;
+		if (state.feedback && state.feedback.correct) return;
+
+		const question = currentQuestion();
+		const result = evaluateAnswer(question, form);
+
+		if (!result.answered) {
+			state.feedback = {
+				correct: false,
+				title: "Answer needed",
+				body: result.message,
+				points: 0
+			};
+			render();
+			return;
+		}
+
+		if (result.correct) {
+			handleCorrectAnswer(question);
+		} else {
+			handleWrongAnswer(result.message);
+		}
+
+		render();
+	}
+
+	function handleCorrectAnswer(question) {
+		const wasFirstTry = state.currentAttempts === 0;
+		const basePoints = Math.max(1, 3 - state.currentAttempts);
+		let streakBonus = 0;
+
+		if (wasFirstTry) {
+			state.firstTry += 1;
+			state.currentStreak += 1;
+			state.bestStreak = Math.max(state.bestStreak, state.currentStreak);
+			streakBonus = state.currentStreak >= 3 ? 1 : 0;
+		} else {
+			state.currentStreak = 0;
+			state.missedQuestions.push(buildMissedEntry(question, state.currentAttempts + 1));
+		}
+
+		const points = basePoints + streakBonus;
+		state.score += points;
+		state.answerLog.push({
+			grade: state.currentGrade,
+			questionId: question.id,
+			subject: question.subject,
+			prompt: question.prompt,
+			firstTry: wasFirstTry,
+			attempts: state.currentAttempts + 1,
+			basePoints,
+			streakBonus,
+			points
+		});
+
+		state.feedback = {
+			correct: true,
+			title: wasFirstTry ? "First try" : "Correct",
+			body: streakBonus ? `${question.explanation} Streak bonus added.` : question.explanation,
+			points
+		};
+	}
+
+	function handleWrongAnswer(message) {
+		state.currentAttempts += 1;
+		state.wrongAttempts += 1;
+		state.currentStreak = 0;
+		state.feedback = {
+			correct: false,
+			title: state.currentAttempts === 1 ? "Try again" : "Think it through",
+			body: message || "That answer is not right yet.",
+			points: 0
+		};
+	}
+
+	function continueAfterCorrect() {
+		if (!state.feedback || !state.feedback.correct) return;
+
+		const grade = currentGrade();
+		if (state.currentQuestion < grade.questions.length - 1) {
+			state.currentQuestion += 1;
+			state.currentAttempts = 0;
+			state.feedback = null;
+			render();
+			return;
+		}
+
+		completeGrade(grade.id);
+	}
+
+	function adminPassGrade() {
+		if (!state.startedAt || state.finishedAt || state.phase === "gradeComplete") return;
+
+		const grade = currentGrade();
+		grade.questions.forEach((question, index) => {
+			const alreadyLogged = state.answerLog.some((item) => item.questionId === question.id);
+			if (alreadyLogged || index < state.currentQuestion) return;
+
+			state.answerLog.push({
+				grade: grade.id,
+				questionId: question.id,
+				subject: question.subject,
+				prompt: question.prompt,
+				firstTry: false,
+				attempts: 0,
+				basePoints: 0,
+				streakBonus: 0,
+				points: 0,
+				adminSkipped: true
+			});
+		});
+
+		state.currentStreak = 0;
+		state.currentAttempts = 0;
+		state.feedback = null;
+		completeGrade(grade.id);
+	}
+
+	function completeGrade(gradeId) {
+		if (!state.completedGrades.includes(gradeId)) {
+			state.completedGrades.push(gradeId);
+		}
+
+		state.phase = "gradeComplete";
+		state.gradeComplete = {
+			gradeId,
+			finishedRun: state.mode === "practice" || gradeId >= 12
+		};
+		state.feedback = null;
+		render();
+	}
+
+	function advanceFromGradeComplete() {
+		if (!state.gradeComplete) return;
+
+		const gradeId = state.gradeComplete.gradeId;
+		const finishedRun = state.gradeComplete.finishedRun;
+
+		if (finishedRun) {
+			finishRun();
+			return;
+		}
+
+		state.currentGrade = gradeId + 1;
+		state.currentQuestion = 0;
+		state.currentAttempts = 0;
+		state.phase = "question";
+		state.gradeComplete = null;
+		state.feedback = null;
+		render();
+	}
+
+	function finishRun() {
+		if (!state.finishedAt) {
+			state.finishedAt = Date.now();
+			stopClock();
+			const entry = buildLeaderboardEntry();
+			state.leaderboardEntryId = entry.id;
+			writeLeaderboard([entry, ...readLeaderboard()]);
+		}
+		navigate("reward");
+		render();
+	}
+
+	function evaluateAnswer(question, form) {
+		if (question.type === "choice") {
+			const selected = form.querySelector("input[name='choice']:checked");
+			if (!selected) {
+				return { answered: false, correct: false, message: "Pick one option before checking." };
+			}
+			return {
+				answered: true,
+				correct: Number(selected.value) === question.answer,
+				message: "Compare the option with the exact wording of the prompt."
+			};
+		}
+
+		if (question.type === "fill") {
+			const answer = normalize(form.elements.answer.value);
+			if (!answer) {
+				return { answered: false, correct: false, message: "Type an answer before checking." };
+			}
+			return {
+				answered: true,
+				correct: question.answers.some((expected) => normalize(expected) === answer),
+				message: "Check the spelling, number, or tense."
+			};
+		}
+
+		if (question.type === "match") {
+			const values = question.pairs.map((_, index) => normalize(form.elements[`match-${index}`].value));
+			if (values.some((value) => !value)) {
+				return { answered: false, correct: false, message: "Complete every match before checking." };
+			}
+			const correct = question.pairs.every((pair, index) => normalize(pair.answer) === values[index]);
+			return {
+				answered: true,
+				correct,
+				message: "Review each pair and look for the strongest match."
+			};
+		}
+
+		return { answered: false, correct: false, message: "This question type is not ready yet." };
+	}
+
+	function syncRoute() {
+		const nextRoute = getRoute();
+
+		if (nextRoute === "game" && !state.startedAt) {
+			navigate("home");
+			return;
+		}
+
+		if ((nextRoute === "reward" || nextRoute === "certificate" || nextRoute === "results") && !state.finishedAt) {
+			navigate("home");
+			return;
+		}
+
+		state.route = nextRoute === "results" ? "reward" : nextRoute;
+		render();
+	}
+
+	function render() {
+		if (!GRADE_CATALOG.length) {
+			app.innerHTML = renderFatalError();
+			return;
+		}
+
+		const route = state.route || getRoute();
+
+		if (route === "game") {
+			stopCertificateCamera();
+			app.innerHTML = renderGame();
+			updateTimerDisplay();
+			return;
+		}
+
+		if (route === "reward" || route === "results") {
+			stopCertificateCamera();
+			app.innerHTML = renderReward();
+			return;
+		}
+
+		if (route === "certificate") {
+			app.innerHTML = renderCertificate();
+			startCertificateCamera();
+			return;
+		}
+
+		if (route === "leaderboard") {
+			stopCertificateCamera();
+			app.innerHTML = renderLeaderboard();
+			return;
+		}
+
+		stopCertificateCamera();
+		app.innerHTML = renderHome();
+	}
+
+	function renderHome() {
+		return `
+			<section class="screen home-screen">
+				<div class="home-inner">
+					<div class="home-copy">
+						<div class="brand-row">
+							<img class="logo" src="img/logo.png" alt="Flexi Academy" />
+							<div>
+								<p class="brand-kicker">Flexi Academy</p>
+								<p class="brand-title">OSSD Challenge</p>
+							</div>
+						</div>
+						<h1>Build your path from Grade 1 to OSSD.</h1>
+						<p>Start from any grade, answer focused skill checks, and keep moving until the final launch.</p>
+						<div class="mode-summary" aria-label="Challenge summary">
+							<div class="metric"><strong>${GRADE_CATALOG.length}</strong><span>grade stops</span></div>
+							<div class="metric"><strong>${supportedQuestionTypes().length}</strong><span>question styles</span></div>
+							<div class="metric"><strong>${totalCatalogQuestions()}</strong><span>starter prompts</span></div>
+						</div>
+					</div>
+
+					<form class="start-panel" data-form="start" autocomplete="off">
+						<div class="mascot-hero">
+							<img src="${MASCOTS.teaching}" alt="Flexi mascot" />
+							<div>
+								<h2>Start Challenge</h2>
+								<p>Your setup is saved locally on this device.</p>
+							</div>
+						</div>
+
+						<label class="field">
+							<span>Student name</span>
+							<input name="name" type="text" value="${escapeAttr(state.playerName)}" placeholder="Type a name" required />
+						</label>
+
+						<label class="field">
+							<span>Starting grade</span>
+							<select name="startGrade" required>
+								${GRADE_CATALOG.map((grade) => `<option value="${grade.id}" ${grade.id === state.startGrade ? "selected" : ""}>Grade ${grade.id} - ${escapeHtml(grade.title)}</option>`).join("")}
+							</select>
+						</label>
+
+						<div class="form-label">Mode</div>
+						<div class="mode-control">
+							<label class="mode-choice">
+								<input type="radio" name="mode" value="challenge" ${state.mode === "challenge" ? "checked" : ""} />
+								<strong>Fast Track</strong>
+								<span>Timed run from the selected grade to Grade 12.</span>
+							</label>
+							<label class="mode-choice">
+								<input type="radio" name="mode" value="practice" ${state.mode === "practice" ? "checked" : ""} />
+								<strong>Normal Track</strong>
+								<span>One grade, no pressure, same scoring model.</span>
+							</label>
+						</div>
+
+						<div class="actions">
+							<button class="btn primary" type="submit">Start</button>
+							<button class="btn ghost" type="button" data-action="leaderboard">Leaderboard</button>
+						</div>
+					</form>
+				</div>
+			</section>
+		`;
+	}
+
+	function renderGame() {
+		const grade = currentGrade();
+		const progress = questionProgressPercent();
+		const panel = state.phase === "gradeComplete" ? renderGradeCompletePanel(grade) : renderQuestionPanel(grade);
+
+		return `
+			<section class="screen game-screen">
+				${renderTopbar()}
+				<div class="game-layout">
+					${renderSidePanel()}
+					<section class="question-panel" style="--grade-color: ${grade.color}">
+						<div class="grade-banner">
+							<span class="pill">Grade ${grade.id}</span>
+							<h1>${escapeHtml(grade.title)}</h1>
+							<p>${escapeHtml(grade.focus)}</p>
+						</div>
+						<div class="progress-strip">
+							<div class="progress-copy">
+								<span>${state.phase === "gradeComplete" ? "Grade complete" : `Question ${state.currentQuestion + 1} of ${grade.questions.length}`}</span>
+								<span>${answeredCount()} of ${totalQuestionsInRun()} answered</span>
+							</div>
+							<div class="progress-track" aria-hidden="true">
+								<div class="progress-fill" style="--progress: ${progress}%"></div>
+							</div>
+						</div>
+						${panel}
+					</section>
+				</div>
+			</section>
+		`;
+	}
+
+	function renderTopbar() {
+		return `
+			<header class="topbar">
+				<div class="brand-row">
+					<img class="logo" src="img/logo.png" alt="Flexi Academy" />
+					<div>
+						<p class="brand-kicker">Flexi Academy</p>
+						<p class="brand-title">OSSD Challenge</p>
+					</div>
+				</div>
+				<div class="session-meta">
+					<span class="pill">${escapeHtml(state.playerName)}</span>
+					<span class="pill mode">${modeLabel()}</span>
+					<span class="timer" data-timer>${formatDuration(elapsedMs())}</span>
+				</div>
+				<div class="topbar-actions">
+					<button class="btn admin" type="button" data-action="admin-pass-grade" ${state.phase === "gradeComplete" ? "disabled" : ""}>Admin Pass</button>
+					<button class="btn ghost" type="button" data-action="quit-run">Exit</button>
+				</div>
+			</header>
+		`;
+	}
+
+	function renderSidePanel() {
+		const mascot = mascotForState();
+		return `
+			<aside class="side-panel">
+				<div class="mascot-card">
+					<img src="${mascot.src}" alt="Flexi mascot" />
+					<div class="speech">${escapeHtml(mascot.speech)}</div>
+				</div>
+				<h2>Journey</h2>
+				<p>${journeySummary()}</p>
+				<div class="run-stats">
+					<div class="score-card"><strong>${state.score}</strong><span>points</span></div>
+					<div class="score-card"><strong>${state.bestStreak}</strong><span>best streak</span></div>
+				</div>
+				<div class="journey-track">
+					${GRADE_CATALOG.map(renderJourneyItem).join("")}
+				</div>
+			</aside>
+		`;
+	}
+
+	function renderJourneyItem(grade) {
+		const inRun = state.mode === "practice" ? grade.id === state.startGrade : grade.id >= state.startGrade;
+		const done = state.completedGrades.includes(grade.id);
+		const current = grade.id === state.currentGrade;
+		const locked = !inRun;
+		const stats = gradeStats(grade.id);
+		const gradeStatsText = done ? `${stats.points} pts${stats.skipped ? `, ${stats.skipped} skipped` : ""}` : current ? "Now" : locked ? "Locked" : "Queued";
+		return `
+			<div class="journey-step ${done ? "done" : ""} ${current ? "current" : ""} ${locked ? "locked" : ""}">
+				<div class="step-node">${done ? "OK" : grade.id}</div>
+				<div class="step-copy">
+					<strong>Grade ${grade.id}</strong>
+					<span>${escapeHtml(grade.title)}</span>
+				</div>
+				<div class="step-status">${gradeStatsText}</div>
+			</div>
+		`;
+	}
+
+	function renderQuestionPanel(grade) {
+		const question = currentQuestion();
+		return `
+			<div class="question-body">
+				<span class="subject-chip">${escapeHtml(question.subject)}</span>
+				<h2 class="question-text">${escapeHtml(question.prompt)}</h2>
+				${renderAnswerArea(question)}
+			</div>
+		`;
+	}
+
+	function renderGradeCompletePanel(grade) {
+		const stats = gradeStats(grade.id);
+		return `
+			<div class="grade-complete">
+				<div class="grade-seal">OSSD</div>
+				<div>
+					<span class="subject-chip">Grade Complete</span>
+					<h2>${escapeHtml(grade.title)} cleared</h2>
+					<p>${gradeCompleteMessage(stats)}</p>
+				</div>
+				<div class="score-grid">
+					<div class="score-card"><strong>${stats.points}</strong><span>grade points</span></div>
+					<div class="score-card"><strong>${stats.firstTry}</strong><span>first try</span></div>
+					<div class="score-card"><strong>${stats.skipped}</strong><span>admin skipped</span></div>
+					<div class="score-card"><strong>${state.bestStreak}</strong><span>best streak</span></div>
+				</div>
+				<div class="panel-actions">
+					<button class="btn primary" type="button" data-action="advance-grade">${gradeCompleteButtonLabel()}</button>
+				</div>
+			</div>
+		`;
+	}
+
+	function renderAnswerArea(question) {
+		if (state.feedback && state.feedback.correct) {
+			return `
+				${renderFeedback()}
+				<div class="question-actions">
+					<button class="btn primary" type="button" data-action="continue">${continueLabel()}</button>
+				</div>
+			`;
+		}
+
+		return `
+			${state.feedback ? renderFeedback() : ""}
+			<form class="answer-form" data-form="answer">
+				${renderQuestionInput(question)}
+				<div class="question-actions">
+					<button class="btn primary" type="submit">Check Answer</button>
+				</div>
+			</form>
+		`;
+	}
+
+	function renderQuestionInput(question) {
+		if (question.type === "choice") {
+			return `
+				<div class="choice-grid">
+					${question.options.map((option, index) => `
+						<label class="choice-card">
+							<input type="radio" name="choice" value="${index}" />
+							<span>${escapeHtml(option)}</span>
+						</label>
+					`).join("")}
+				</div>
+			`;
+		}
+
+		if (question.type === "fill") {
+			const inputMode = question.inputMode === "numeric" || question.inputMode === "decimal" ? "decimal" : "text";
+			return `
+				<label class="field">
+					<span>Your answer</span>
+					<input class="answer-input" name="answer" type="text" inputmode="${inputMode}" autocomplete="off" placeholder="Type your answer" />
+				</label>
+			`;
+		}
+
+		if (question.type === "match") {
+			return `
+				<div class="match-grid">
+					${question.pairs.map((pair, index) => `
+						<label class="match-row">
+							<span class="match-prompt">${escapeHtml(pair.label)}</span>
+							<select class="match-select" name="match-${index}">
+								<option value="">Select match</option>
+								${question.choices.map((choiceText) => `<option value="${escapeAttr(choiceText)}">${escapeHtml(choiceText)}</option>`).join("")}
+							</select>
+						</label>
+					`).join("")}
+				</div>
+			`;
+		}
+
+		return `<div class="empty-state">Question renderer missing.</div>`;
+	}
+
+	function renderFeedback() {
+		const feedback = state.feedback;
+		return `
+			<div class="feedback ${feedback.correct ? "correct" : "wrong"}">
+				<strong>${escapeHtml(feedback.title)}${feedback.points ? ` (+${feedback.points})` : ""}</strong>
+				<p>${escapeHtml(feedback.body)}</p>
+			</div>
+		`;
+	}
+
+	function renderReward() {
+		const summary = runSummary();
+		return `
+			<section class="screen reward-screen">
+				<div class="confetti-stream" aria-hidden="true">${Array.from({ length: 18 }, (_, index) => `<span style="--i:${index}"></span>`).join("")}</div>
+				<div class="result-panel reward-panel">
+					<div class="result-header">
+						<img src="${MASCOTS.clap}" alt="Flexi clapping" />
+						<div>
+							<div class="grade-seal">OSSD</div>
+							<h1>${escapeHtml(summary.title)}</h1>
+							<p>${escapeHtml(summary.message)}</p>
+						</div>
+					</div>
+					<div class="score-grid">
+						<div class="score-card"><strong>${state.score}</strong><span>points</span></div>
+						<div class="score-card"><strong>${state.completedGrades.length}</strong><span>grades</span></div>
+						<div class="score-card"><strong>${state.firstTry}</strong><span>first try</span></div>
+						<div class="score-card"><strong>${state.bestStreak}</strong><span>best streak</span></div>
+						<div class="score-card"><strong>${state.missedQuestions.length}</strong><span>review items</span></div>
+						<div class="score-card"><strong>${totalAdminSkipped()}</strong><span>admin skipped</span></div>
+						<div class="score-card"><strong>${formatDuration(elapsedMs())}</strong><span>time</span></div>
+					</div>
+					${renderReviewSection()}
+					<div class="panel-actions">
+						<button class="btn accent" type="button" data-action="view-certificate">Certificate</button>
+						<button class="btn primary" type="button" data-action="restart-run">Run Again</button>
+						<button class="btn ghost" type="button" data-action="leaderboard">Leaderboard</button>
+						<button class="btn link" type="button" data-action="home">Home</button>
+					</div>
+				</div>
+			</section>
+		`;
+	}
+
+	function renderReviewSection() {
+		if (!state.missedQuestions.length) {
+			return `
+				<section class="review-panel success-review">
+					<h2>Review</h2>
+					<p>No missed prompts in this run.</p>
+				</section>
+			`;
+		}
+
+		return `
+			<section class="review-panel">
+				<h2>Review These</h2>
+				<div class="review-list">
+					${state.missedQuestions.map((item) => `
+						<article class="review-item">
+							<span class="subject-chip">${escapeHtml(item.subject)}</span>
+							<h3>Grade ${item.grade}: ${escapeHtml(item.prompt)}</h3>
+							<p><strong>Answer:</strong> ${escapeHtml(item.answer)}</p>
+							<p>${escapeHtml(item.explanation)}</p>
+						</article>
+					`).join("")}
+				</div>
+			</section>
+		`;
+	}
+
+	function renderCertificate() {
+		const summary = runSummary();
+		const hasSelfie = Boolean(state.selfieDataUrl);
+		return `
+			<section class="screen certificate-screen">
+				<div class="certificate-sheet">
+					<div class="certificate-brand">
+						<img src="img/logo.png" alt="Flexi Academy" />
+						<div>
+							<p class="brand-kicker">Flexi Academy</p>
+							<p class="brand-title">OSSD Challenge</p>
+						</div>
+					</div>
+					<div class="certificate-seal">OSSD</div>
+					<p class="certificate-kicker">Certificate of Achievement</p>
+					<h1>${escapeHtml(state.playerName)}</h1>
+					<p class="certificate-copy">has completed ${escapeHtml(summary.gradeLabel)} with ${state.score} points in ${formatDuration(elapsedMs())}.</p>
+					<div class="certificate-selfie-wrap">
+						<div class="certificate-selfie ${hasSelfie ? "captured" : ""}">
+							${hasSelfie
+								? `<img src="${state.selfieDataUrl}" alt="${escapeAttr(state.playerName)} selfie" />`
+								: `<video id="camera-preview" autoplay playsinline muted></video>`
+							}
+						</div>
+						<div class="selfie-controls no-print">
+							<p id="camera-status" class="camera-status ${state.cameraError ? "error" : ""}">${escapeHtml(certificateCameraMessage())}</p>
+							<canvas id="photo-canvas" hidden></canvas>
+							${hasSelfie
+								? `<button class="btn ghost" type="button" data-action="retake-selfie">Retake Selfie</button>`
+								: `<button class="btn primary" type="button" data-action="capture-selfie">Capture Selfie</button>`
+							}
+						</div>
+					</div>
+					<div class="certificate-meta">
+						<div><strong>${state.firstTry}</strong><span>first try</span></div>
+						<div><strong>${state.bestStreak}</strong><span>best streak</span></div>
+						<div><strong>${todayLabel()}</strong><span>date</span></div>
+					</div>
+					<div class="certificate-footer">
+						<div>
+							<strong>Flexi Academy</strong>
+							<span>Learning Path Completion</span>
+						</div>
+						<img src="img/flexi_clap.png" alt="Flexi mascot" />
+					</div>
+				</div>
+				<div class="cert-actions no-print">
+					<button class="btn primary" type="button" data-action="print-certificate" ${hasSelfie ? "" : "disabled"}>Print</button>
+					<button class="btn ghost" type="button" data-action="back-reward">Back</button>
+				</div>
+			</section>
+		`;
+	}
+
+	function startCertificateCamera() {
+		if (state.selfieDataUrl) {
+			stopCertificateCamera();
+			return;
+		}
+
+		const video = document.getElementById("camera-preview");
+		if (!video) return;
+
+		if (cameraStream) {
+			video.srcObject = cameraStream;
+			setCameraStatus("Camera ready. Capture a selfie to unlock printing.");
+			return;
+		}
+
+		if (typeof navigator === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+			state.cameraStatus = "blocked";
+			state.cameraError = "Camera access is unavailable in this browser context.";
+			setCameraStatus(state.cameraError, true);
+			return;
+		}
+
+		state.cameraStatus = "starting";
+		state.cameraError = "";
+		setCameraStatus("Starting camera. Allow permission if prompted.");
+
+		navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
+			.then((stream) => {
+				cameraStream = stream;
+				state.cameraStatus = "ready";
+				state.cameraError = "";
+				const currentVideo = document.getElementById("camera-preview");
+				if (currentVideo) {
+					currentVideo.srcObject = stream;
+					currentVideo.play().catch(() => {});
+				}
+				setCameraStatus("Camera ready. Capture a selfie to unlock printing.");
+			})
+			.catch(() => {
+				state.cameraStatus = "blocked";
+				state.cameraError = "Camera permission is required before printing.";
+				setCameraStatus(state.cameraError, true);
+			});
+	}
+
+	function stopCertificateCamera() {
+		if (!cameraStream) return;
+		cameraStream.getTracks().forEach((track) => track.stop());
+		cameraStream = null;
+	}
+
+	function captureSelfie() {
+		const video = document.getElementById("camera-preview");
+		const canvas = document.getElementById("photo-canvas");
+
+		if (!video || !canvas) return;
+		if (!video.videoWidth || !video.videoHeight) {
+			state.cameraError = "Camera is still starting. Try again in a moment.";
+			setCameraStatus(state.cameraError, true);
+			return;
+		}
+
+		canvas.width = video.videoWidth;
+		canvas.height = video.videoHeight;
+		const ctx = canvas.getContext("2d");
+		ctx.translate(canvas.width, 0);
+		ctx.scale(-1, 1);
+		ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+		state.selfieDataUrl = canvas.toDataURL("image/jpeg", 0.9);
+		state.cameraStatus = "captured";
+		state.cameraError = "";
+		stopCertificateCamera();
+		render();
+	}
+
+	function retakeSelfie() {
+		state.selfieDataUrl = null;
+		state.cameraStatus = "idle";
+		state.cameraError = "";
+		render();
+	}
+
+	function setCameraStatus(message, isError = false) {
+		const status = document.getElementById("camera-status");
+		if (!status) return;
+		status.textContent = message;
+		status.classList.toggle("error", isError);
+	}
+
+	function certificateCameraMessage() {
+		if (state.cameraError) return state.cameraError;
+		if (state.selfieDataUrl) return "Selfie captured. Printing is unlocked.";
+		if (state.cameraStatus === "starting") return "Starting camera. Allow permission if prompted.";
+		if (state.cameraStatus === "ready") return "Camera ready. Capture a selfie to unlock printing.";
+		return "Selfie required before printing.";
+	}
+
+	function renderLeaderboard() {
+		const rows = readLeaderboard();
+		return `
+			<section class="screen leaderboard-screen">
+				<div class="leaderboard-panel">
+					<h1>Leaderboard</h1>
+					${rows.length ? `
+						<ol class="leaderboard-list">
+							${rows.map((row, index) => renderLeaderRow(row, index)).join("")}
+						</ol>
+					` : `<div class="empty-state">No completed runs yet.</div>`}
+					<div class="panel-actions">
+						<button class="btn primary" type="button" data-action="home">Home</button>
+						<button class="btn ghost" type="button" data-action="clear-leaderboard" ${rows.length ? "" : "disabled"}>Clear</button>
+					</div>
+				</div>
+			</section>
+		`;
+	}
+
+	function renderLeaderRow(row, index) {
+		return `
+			<li class="leader-row">
+				<div class="rank">${index + 1}</div>
+				<div class="leader-main">
+					<strong>${escapeHtml(row.name)}</strong>
+					<span>${escapeHtml(row.modeLabel || row.mode || "Run")} - ${escapeHtml(row.gradeLabel || "Grades")}</span>
+				</div>
+				<div class="leader-meta">${row.score} pts - ${row.firstTry || 0} first try${row.adminSkipped ? ` - ${row.adminSkipped} skipped` : ""} - ${formatDuration(row.ms || 0)}</div>
+			</li>
+		`;
+	}
+
+	function renderFatalError() {
+		return `
+			<section class="screen leaderboard-screen">
+				<div class="leaderboard-panel">
+					<h1>Content failed to load</h1>
+					<p class="empty-state">The grade catalog was not found. Check that data.js loads before script.js.</p>
+				</div>
+			</section>
+		`;
+	}
+
+	function currentGrade() {
+		return gradeById(state.currentGrade) || GRADE_CATALOG[0];
+	}
+
+	function currentQuestion() {
+		return currentGrade().questions[state.currentQuestion] || currentGrade().questions[0];
+	}
+
+	function gradeById(id) {
+		return GRADE_CATALOG.find((grade) => grade.id === Number(id));
+	}
+
+	function totalQuestionsInRun() {
+		if (state.mode === "practice") return gradeById(state.startGrade).questions.length;
+		return GRADE_CATALOG
+			.filter((grade) => grade.id >= state.startGrade)
+			.reduce((total, grade) => total + grade.questions.length, 0);
+	}
+
+	function totalCatalogQuestions() {
+		return GRADE_CATALOG.reduce((total, grade) => total + grade.questions.length, 0);
+	}
+
+	function supportedQuestionTypes() {
+		return [...new Set(GRADE_CATALOG.flatMap((grade) => grade.questions.map((question) => question.type)))];
+	}
+
+	function answeredCount() {
+		return state.answerLog.length;
+	}
+
+	function totalAdminSkipped() {
+		return state.answerLog.filter((item) => item.adminSkipped).length;
+	}
+
+	function questionProgressPercent() {
+		if (state.phase === "gradeComplete") return 100;
+		const grade = currentGrade();
+		const local = state.feedback && state.feedback.correct ? state.currentQuestion + 1 : state.currentQuestion;
+		return Math.round((local / grade.questions.length) * 100);
+	}
+
+	function continueLabel() {
+		const grade = currentGrade();
+		if (state.currentQuestion < grade.questions.length - 1) return "Next Question";
+		return "Complete Grade";
+	}
+
+	function gradeCompleteButtonLabel() {
+		if (!state.gradeComplete) return "Continue";
+		if (state.gradeComplete.finishedRun) return "View Reward";
+		return `Start Grade ${state.gradeComplete.gradeId + 1}`;
+	}
+
+	function modeLabel() {
+		return state.mode === "practice" ? "Practice" : "OSSD Challenge";
+	}
+
+	function journeySummary() {
+		if (state.mode === "practice") return `Practice run for Grade ${state.startGrade}.`;
+		return `Grade ${state.startGrade} through Grade 12.`;
+	}
+
+	function mascotForState() {
+		if (state.phase === "gradeComplete") {
+			return { src: MASCOTS.clap, speech: "Grade cleared. Take the stamp and keep moving." };
+		}
+		if (state.feedback && state.feedback.correct) {
+			return {
+				src: MASCOTS.happy,
+				speech: state.currentStreak >= 3 ? `First-try streak: ${state.currentStreak}.` : "Good answer. Lock it in and keep going."
+			};
+		}
+		if (state.feedback && !state.feedback.correct) {
+			return {
+				src: state.currentAttempts > 1 ? MASCOTS.thinking : MASCOTS.sad,
+				speech: state.currentAttempts > 1 ? "Slow down and compare the clues." : "Try one more pass."
+			};
+		}
+		return { src: MASCOTS.teaching, speech: `Grade ${state.currentGrade}: ${currentGrade().focus}` };
+	}
+
+	function gradeStats(gradeId) {
+		const logs = state.answerLog.filter((item) => item.grade === gradeId);
+		return {
+			points: logs.reduce((total, item) => total + item.points, 0),
+			firstTry: logs.filter((item) => item.firstTry).length,
+			missed: logs.filter((item) => !item.firstTry && !item.adminSkipped).length,
+			skipped: logs.filter((item) => item.adminSkipped).length,
+			total: gradeById(gradeId).questions.length
+		};
+	}
+
+	function gradeCompleteMessage(stats) {
+		if (stats.skipped > 0) return `${stats.skipped} prompts were passed by admin. No points were awarded for skipped prompts.`;
+		if (stats.missed === 0) return "Clean grade. No review items were added.";
+		if (stats.missed === 1) return "One prompt was added to your final review.";
+		return `${stats.missed} prompts were added to your final review.`;
+	}
+
+	function runSummary() {
+		const grades = state.completedGrades.slice().sort((a, b) => a - b);
+		const gradeLabel = grades.length === 1 ? `Grade ${grades[0]}` : `Grades ${grades[0]}-${grades[grades.length - 1]}`;
+		return {
+			title: `${gradeLabel} complete`,
+			gradeLabel,
+			message: `${state.playerName} scored ${state.score} points across ${answeredCount()} prompts.`
+		};
+	}
+
+	function buildLeaderboardEntry() {
+		const summary = runSummary();
+		return {
+			id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+			name: state.playerName,
+			mode: state.mode,
+			modeLabel: modeLabel(),
+			gradeLabel: summary.gradeLabel,
+			score: state.score,
+			grades: state.completedGrades.length,
+			firstTry: state.firstTry,
+			bestStreak: state.bestStreak,
+			reviewItems: state.missedQuestions.length,
+			adminSkipped: totalAdminSkipped(),
+			ms: elapsedMs(),
+			date: new Date().toISOString()
+		};
+	}
+
+	function buildMissedEntry(question, attempts) {
+		return {
+			grade: state.currentGrade,
+			questionId: question.id,
+			subject: question.subject,
+			prompt: question.prompt,
+			answer: answerLabel(question),
+			explanation: question.explanation,
+			attempts
+		};
+	}
+
+	function answerLabel(question) {
+		if (question.type === "choice") return question.options[question.answer];
+		if (question.type === "fill") return question.answers[0];
+		if (question.type === "match") {
+			return question.pairs.map((pair) => `${pair.label}: ${pair.answer}`).join("; ");
+		}
+		return "See explanation";
+	}
+
+	function readLeaderboard() {
+		try {
+			const rows = JSON.parse(localStorage.getItem(STORAGE_KEYS.leaderboard) || "[]");
+			return rows
+				.filter((row) => row && row.name)
+				.sort((a, b) => b.score - a.score || b.grades - a.grades || a.ms - b.ms)
+				.slice(0, 25);
+		} catch {
+			return [];
 		}
 	}
 
-	btnCapturePhoto.addEventListener('click', ()=>{
-		const ctx2 = photoCanvas.getContext('2d');
-		photoCanvas.width = cameraPreview.videoWidth;
-		photoCanvas.height = cameraPreview.videoHeight;
-		
-		// Flip horizontally to match preview
-		ctx2.translate(photoCanvas.width, 0);
-		ctx2.scale(-1, 1);
-		ctx2.drawImage(cameraPreview, 0, 0);
-		
-		// Show captured photo, hide video
-		photoCanvas.classList.add('show');
-		cameraPreview.classList.add('hide');
-		btnCapturePhoto.style.display = 'none';
-		btnRetakePhoto.style.display = 'inline-block';
-		
-		stopCamera();
-		showToast('Photo captured!');
-	});
+	function writeLeaderboard(rows) {
+		const sorted = rows
+			.sort((a, b) => b.score - a.score || b.grades - a.grades || a.ms - b.ms)
+			.slice(0, 25);
+		localStorage.setItem(STORAGE_KEYS.leaderboard, JSON.stringify(sorted));
+	}
 
-	btnRetakePhoto.addEventListener('click', ()=>{
-		photoCanvas.classList.remove('show');
-		cameraPreview.classList.remove('hide');
-		btnRetakePhoto.style.display = 'none';
-		btnCapturePhoto.style.display = 'inline-block';
-		startCamera();
-	});
-
-	btnPrintCert.addEventListener('click', ()=>{
-		window.print();
-	});
-
-	btnBackToReward.addEventListener('click', ()=>{
-		stopCamera();
-		navigate('reward');
-	});
-
-	// Stop camera when leaving certificate page
-	window.addEventListener('hashchange', ()=>{
-		if(!window.location.hash.includes('certificate')){
-			stopCamera();
+	function readLastSetup() {
+		try {
+			const setup = JSON.parse(localStorage.getItem(STORAGE_KEYS.lastSetup) || "{}");
+			return {
+				name: typeof setup.name === "string" ? setup.name : "",
+				mode: setup.mode === "practice" ? "practice" : "challenge",
+				startGrade: gradeById(Number(setup.startGrade)) ? Number(setup.startGrade) : 1
+			};
+		} catch {
+			return { name: "", mode: "challenge", startGrade: 1 };
 		}
-	});
+	}
 
+	function saveLastSetup(setup) {
+		localStorage.setItem(STORAGE_KEYS.lastSetup, JSON.stringify(setup));
+	}
+
+	function startClock() {
+		stopClock();
+		timerId = window.setInterval(updateTimerDisplay, 1000);
+	}
+
+	function stopClock() {
+		if (timerId) {
+			window.clearInterval(timerId);
+			timerId = null;
+		}
+	}
+
+	function updateTimerDisplay() {
+		const timer = app.querySelector("[data-timer]");
+		if (timer) timer.textContent = formatDuration(elapsedMs());
+	}
+
+	function elapsedMs() {
+		if (!state.startedAt) return 0;
+		const end = state.finishedAt || Date.now();
+		return Math.max(0, end - state.startedAt);
+	}
+
+	function formatDuration(ms) {
+		const totalSeconds = Math.floor(ms / 1000);
+		const minutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		return `${minutes}:${String(seconds).padStart(2, "0")}`;
+	}
+
+	function todayLabel() {
+		return new Date().toLocaleDateString("en-US", {
+			year: "numeric",
+			month: "long",
+			day: "numeric"
+		});
+	}
+
+	function getRoute() {
+		const route = window.location.hash.replace(/^#\/?/, "") || "home";
+		return ["home", "game", "reward", "results", "certificate", "leaderboard"].includes(route) ? route : "home";
+	}
+
+	function navigate(route) {
+		state.route = route === "results" ? "reward" : route;
+		if (getRoute() === route) {
+			render();
+			return;
+		}
+		window.location.hash = route;
+		render();
+	}
+
+	function normalize(value) {
+		return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+	}
+
+	function escapeHtml(value) {
+		return String(value)
+			.replace(/&/g, "&amp;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;")
+			.replace(/"/g, "&quot;")
+			.replace(/'/g, "&#039;");
+	}
+
+	function escapeAttr(value) {
+		return escapeHtml(value);
+	}
 })();
-
-
