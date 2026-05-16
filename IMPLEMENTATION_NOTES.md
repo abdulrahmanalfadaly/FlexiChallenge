@@ -73,6 +73,8 @@ Completed in Phase 2:
 - Printable certificate route with required selfie capture
 - Leaderboard entries now include first-try and streak context
 - Admin Pass button for operator-controlled grade bypasses; skipped prompts earn zero points and are recorded separately
+- Route transition overlay: Flexi happy flies from bottom-left to top-right, then the next page fades in
+- Certificate-only stamp. The image placeholder is the `CERTIFICATE_STAMP_IMAGE` constant near the top of `script.js`.
 
 Deferred:
 
